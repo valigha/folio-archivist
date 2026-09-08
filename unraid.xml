@@ -1,0 +1,37 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>folio-archivist</Name>
+  <Repository>ghcr.io/valigha/folio-archivist:latest</Repository>
+  <Registry>https://ghcr.io/</Registry>
+  <Network>bridge</Network>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support/>
+  <Project>https://nhentai.net/api/v2/docs</Project>
+  <Overview>Scheduled nhentai CBZ archivist using official API v2. Set NHENTAI_TAGS, map a library folder, and it downloads whatever is missing then sleeps. Replacement for 9-FS/nhentai_archivist after /api/gallery started returning 403.</Overview>
+  <Category>MediaApp:Books Downloaders:</Category>
+  <WebUI>http://[IP]:[PORT:8099]/</WebUI>
+  <Icon>https://nhentai.net/favicon.ico</Icon>
+  <ExtraParams/>
+  <PostArgs/>
+  <Requires>After the first GitHub Actions build, make the GHCR package public (repo -> Packages -> folio-archivist -> Package settings -> Change visibility -> Public) so Unraid can pull without a login.</Requires>
+  <Config Name="WebUI" Target="8099" Default="8099" Mode="tcp" Description="Status dashboard" Type="Port" Display="always" Required="true" Mask="false">8099</Config>
+  <Config Name="Library" Target="/app/hentai" Default="/mnt/user/media/hentai" Mode="rw" Description="Where CBZ files are written" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/media/hentai</Config>
+  <Config Name="Config" Target="/app/config" Default="/mnt/user/appdata/folio/config" Mode="rw" Description="downloadme.txt / dontdownloadme.txt / optional .env" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/folio/config</Config>
+  <Config Name="Logs" Target="/app/log" Default="/mnt/user/appdata/folio/log" Mode="rw" Description="Status JSON and log file" Type="Path" Display="advanced" Required="false" Mask="false">/mnt/user/appdata/folio/log</Config>
+  <Config Name="NHENTAI_TAGS" Target="NHENTAI_TAGS" Default="language:"english"" Mode="" Description="Server-mode search query" Type="Variable" Display="always" Required="false" Mask="false">language:"english"</Config>
+  <Config Name="SLEEP_INTERVAL" Target="SLEEP_INTERVAL" Default="3600" Mode="" Description="Seconds to wait after a cycle before searching again" Type="Variable" Display="always" Required="true" Mask="false">3600</Config>
+  <Config Name="LIBRARY_SPLIT" Target="LIBRARY_SPLIT" Default="10000" Mode="" Description="Split the library into folders of this many IDs. 0 = flat folder." Type="Variable" Display="always" Required="false" Mask="false">10000</Config>
+  <Config Name="FILENAME_TITLE_TYPE" Target="FILENAME_TITLE_TYPE" Default="English" Mode="" Description="English, Japanese, or Pretty" Type="Variable" Display="advanced" Required="false" Mask="false">English</Config>
+  <Config Name="DOWNLOAD_WORKERS" Target="DOWNLOAD_WORKERS" Default="5" Mode="" Description="Parallel page downloads" Type="Variable" Display="advanced" Required="false" Mask="false">5</Config>
+  <Config Name="SAFETY_FILTER" Target="SAFETY_FILTER" Default="true" Mode="" Description="Skip and blacklist illegal tags" Type="Variable" Display="always" Required="false" Mask="false">true</Config>
+  <Config Name="CATCH_UP_STREAK" Target="CATCH_UP_STREAK" Default="50" Mode="" Description="Stop the cycle after this many already-have galleries in a row. 0 = full sweep." Type="Variable" Display="always" Required="false" Mask="false">50</Config>
+  <Config Name="MAX_PER_CYCLE" Target="MAX_PER_CYCLE" Default="0" Mode="" Description="Max new galleries per cycle. 0 = unlimited." Type="Variable" Display="advanced" Required="false" Mask="false">0</Config>
+  <Config Name="CIRCUMVENT_LOAD_BALANCER" Target="CIRCUMVENT_LOAD_BALANCER" Default="true" Mode="" Description="Talk to i1/i2/i3/i4.nhentai.net directly" Type="Variable" Display="advanced" Required="false" Mask="false">true</Config>
+  <Config Name="API_KEY" Target="API_KEY" Default="" Mode="" Description="Optional nhentai API key" Type="Variable" Display="advanced" Required="false" Mask="true"></Config>
+  <Config Name="USER_AGENT" Target="USER_AGENT" Default="Folio/1.0 (nhentai API v2 archivist; +https://nhentai.net/api/v2/docs)" Mode="" Description="Descriptive User-Agent required by API v2" Type="Variable" Display="advanced" Required="false" Mask="false">Folio/1.0 (nhentai API v2 archivist; +https://nhentai.net/api/v2/docs)</Config>
+  <Config Name="PUID" Target="PUID" Default="99" Mode="" Description="Unraid nobody" Type="Variable" Display="advanced" Required="false" Mask="false">99</Config>
+  <Config Name="PGID" Target="PGID" Default="100" Mode="" Description="Unraid users" Type="Variable" Display="advanced" Required="false" Mask="false">100</Config>
+  <Config Name="UMASK" Target="UMASK" Default="002" Mode="" Description="Created file mask" Type="Variable" Display="advanced" Required="false" Mask="false">002</Config>
+  <Config Name="TZ" Target="TZ" Default="America/New_York" Mode="" Description="Timezone" Type="Variable" Display="advanced" Required="false" Mask="false">America/New_York</Config>
+</Container>
