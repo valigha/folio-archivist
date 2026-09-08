@@ -1,0 +1,454 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Folio · Archivist</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Newsreader:opsz,wght@6..72,500&display=swap" rel="stylesheet"/>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0b0c0e;
+      --surface: #14161a;
+      --surface-2: #1b1e24;
+      --fg: #ece8e1;
+      --muted: #8a8680;
+      --line: rgba(236, 232, 225, 0.12);
+      --accent: #7f9a8f;
+      --warn: #c4a574;
+      --danger: #c17b74;
+      --ok: #7f9a8f;
+      --radius: 16px;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; background: var(--bg); color: var(--fg); }
+    body {
+      font-family: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+      line-height: 1.5;
+      min-height: 100vh;
+    }
+    button, [role="button"] { cursor: pointer; font: inherit; }
+    main { max-width: 1080px; margin: 0 auto; padding: 28px 20px 72px; }
+    .top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 20px;
+      flex-wrap: wrap;
+      margin-bottom: 22px;
+    }
+    .kicker {
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: var(--muted);
+      font-size: 11px;
+      margin: 0 0 6px;
+    }
+    h1 {
+      font-family: Newsreader, Georgia, serif;
+      font-weight: 500;
+      font-size: clamp(36px, 6vw, 52px);
+      margin: 0;
+      letter-spacing: -0.03em;
+      line-height: 1;
+    }
+    .clock-wrap { text-align: right; min-width: 220px; }
+    .clock-label { color: var(--muted); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; }
+    .clock {
+      font-family: Newsreader, Georgia, serif;
+      font-size: clamp(40px, 7vw, 64px);
+      font-variant-numeric: tabular-nums;
+      letter-spacing: -0.04em;
+      line-height: 1;
+      margin: 4px 0 0;
+    }
+    .clock.sleeping { color: var(--accent); }
+    .tags {
+      color: var(--muted);
+      font-size: 13px;
+      margin: 10px 0 0;
+      max-width: 46em;
+      word-break: break-word;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      border: 1px solid var(--line);
+      padding: 5px 12px;
+      border-radius: 999px;
+      font-size: 11px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-top: 14px;
+    }
+    .badge::before {
+      content: "";
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: currentColor;
+      box-shadow: 0 0 0 4px color-mix(in srgb, currentColor 20%, transparent);
+    }
+    .badge.searching, .badge.downloading { color: var(--warn); }
+    .badge.sleeping { color: var(--accent); }
+    .badge.rate-limited, .badge.error { color: var(--danger); }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 10px;
+      margin: 22px 0;
+    }
+    .stat {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 14px 16px;
+    }
+    .stat b { display: block; font-size: 22px; font-variant-numeric: tabular-nums; letter-spacing: -0.03em; }
+    .stat span { color: var(--muted); font-size: 12px; letter-spacing: 0.04em; }
+    .grid {
+      display: grid;
+      grid-template-columns: 1.15fr 0.85fr;
+      gap: 14px;
+    }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 20px;
+      min-height: 220px;
+    }
+    .card h2 {
+      margin: 0 0 14px;
+      font-size: 12px;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--muted);
+      font-weight: 500;
+    }
+    .now-title {
+      font-family: Newsreader, Georgia, serif;
+      font-size: 28px;
+      margin: 0 0 8px;
+      letter-spacing: -0.03em;
+      line-height: 1.15;
+      word-break: break-word;
+    }
+    .now-meta { color: var(--muted); font-size: 13px; margin-bottom: 16px; }
+    .bar {
+      height: 8px;
+      background: var(--surface-2);
+      border-radius: 99px;
+      overflow: hidden;
+    }
+    .bar > i {
+      display: block;
+      height: 100%;
+      width: 0;
+      background: var(--accent);
+      border-radius: inherit;
+      transition: width 400ms ease;
+    }
+    .bar.warn > i { background: var(--warn); }
+    .pct { margin-top: 8px; font-variant-numeric: tabular-nums; font-size: 13px; color: var(--muted); }
+    .list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+    .list li {
+      display: grid;
+      grid-template-columns: 72px 1fr auto;
+      gap: 10px;
+      align-items: baseline;
+      padding: 10px 12px;
+      background: var(--surface-2);
+      border-radius: 12px;
+    }
+    .list .id { font-variant-numeric: tabular-nums; color: var(--accent); font-size: 12px; }
+    .list .name { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .list .when { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+    .empty { color: var(--muted); font-size: 14px; padding: 18px 0; }
+    .log-wrap { margin-top: 14px; }
+    .log-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 10px;
+    }
+    .log-head h2 {
+      margin: 0;
+      font-size: 12px;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--muted);
+      font-weight: 500;
+    }
+    .tools { display: flex; gap: 8px; flex-wrap: wrap; }
+    .tools button {
+      background: var(--surface);
+      color: var(--fg);
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 6px 12px;
+      font-size: 12px;
+    }
+    .tools button.on, .tools button:hover { border-color: var(--accent); color: var(--accent); }
+    .log {
+      background: #101216;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      height: 240px;
+      overflow: auto;
+      padding: 12px 14px;
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 12px;
+      line-height: 1.55;
+    }
+    .log.open { height: min(70vh, 720px); }
+    .log .row { display: grid; grid-template-columns: 76px 52px 1fr; gap: 10px; }
+    .log .t { color: var(--muted); }
+    .log .INFO { color: #b7c4bc; }
+    .log .WARN { color: var(--warn); }
+    .log .ERROR { color: var(--danger); }
+    .hidden { display: none; }
+    @media (max-width: 860px) {
+      .stats { grid-template-columns: repeat(2, 1fr); }
+      .grid, .clock-wrap { display: block; }
+      .clock-wrap { text-align: left; margin-top: 8px; }
+      .list li { grid-template-columns: 64px 1fr; }
+      .list .when { grid-column: 2; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      * { transition: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="top">
+      <div>
+        <p class="kicker">Unraid worker</p>
+        <h1>Folio</h1>
+        <div class="badge" id="badge">starting</div>
+        <p class="tags" id="tags"></p>
+      </div>
+      <div class="clock-wrap">
+        <div class="clock-label" id="clockLabel">Elapsed</div>
+        <div class="clock" id="clock">00:00:00</div>
+      </div>
+    </div>
+
+    <div class="stats">
+      <div class="stat"><span>Library</span><b id="sLibrary">0</b></div>
+      <div class="stat"><span>Added</span><b id="sAdded">0</b></div>
+      <div class="stat"><span>Skipped</span><b id="sSkipped">0</b></div>
+      <div class="stat"><span>Failed</span><b id="sFailed">0</b></div>
+      <div class="stat"><span>Cycle</span><b id="sCycle">0</b></div>
+    </div>
+
+    <div class="grid">
+      <section class="card">
+        <h2>Now</h2>
+        <p class="now-title" id="nowTitle">Starting…</p>
+        <p class="now-meta" id="nowMeta"></p>
+        <div class="bar" id="bar"><i id="barFill"></i></div>
+        <p class="pct" id="pct"></p>
+      </section>
+      <section class="card">
+        <h2>Recently written</h2>
+        <ul class="list" id="recent"></ul>
+        <p class="empty" id="recentEmpty">Nothing written this session yet.</p>
+      </section>
+    </div>
+
+    <section class="log-wrap">
+      <div class="log-head">
+        <h2>Log</h2>
+        <div class="tools">
+          <button type="button" data-filter="all" class="on">All</button>
+          <button type="button" data-filter="INFO">Info</button>
+          <button type="button" data-filter="WARN">Warn</button>
+          <button type="button" data-filter="ERROR">Error</button>
+          <button type="button" id="expand">Expand</button>
+          <button type="button" id="copy">Copy</button>
+        </div>
+      </div>
+      <div class="log" id="log"></div>
+    </section>
+  </main>
+  <script>
+    let data = null;
+    let filter = "all";
+    let logOpen = false;
+    const $ = (id) => document.getElementById(id);
+
+    function esc(s) {
+      return String(s ?? "").replace(/[&<>"']/g, (c) => ({
+        "&": "&", "<": "<", ">": ">", '"': """, "'": "&#39;"
+      }[c]));
+    }
+    function pad(n) { return String(n).padStart(2, "0"); }
+    function hms(ms) {
+      const s = Math.max(0, Math.floor(ms / 1000));
+      return pad(Math.floor(s / 3600)) + ":" + pad(Math.floor((s % 3600) / 60)) + ":" + pad(s % 60);
+    }
+    function ago(iso) {
+      if (!iso) return "";
+      const s = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
+      if (s < 60) return s + "s";
+      if (s < 3600) return Math.floor(s / 60) + "m";
+      return Math.floor(s / 3600) + "h";
+    }
+    function parseLog(line) {
+      const m = String(line).match(/^\[(.+?)\]\s+(\w+)\s+(.*)$/);
+      if (!m) return { t: "", level: "INFO", msg: line };
+      return { t: m[1].slice(11, 19), level: m[2].trim(), msg: m[3] };
+    }
+
+    function tick() {
+      if (!data) return;
+      const clock = $("clock");
+      const label = $("clockLabel");
+      if (data.state === "sleeping" && data.sleepUntil) {
+        const left = new Date(data.sleepUntil).getTime() - Date.now();
+        label.textContent = "Next run in";
+        clock.textContent = hms(left);
+        clock.className = "clock sleeping";
+      } else {
+        const start = data.cycleStartedAt || data.startedAt;
+        label.textContent = data.state === "stopped" ? "Stopped" : "This cycle";
+        clock.textContent = hms(Date.now() - new Date(start).getTime());
+        clock.className = "clock";
+      }
+    }
+
+    function paintNow() {
+      const title = $("nowTitle");
+      const meta = $("nowMeta");
+      const bar = $("bar");
+      const fill = $("barFill");
+      const pct = $("pct");
+      const st = data.state;
+      if (st === "sleeping") {
+        title.textContent = "Sleeping until next search";
+        meta.textContent = data.message || "Waiting for SLEEP_INTERVAL.";
+        fill.style.width = "100%";
+        bar.className = "bar";
+        pct.textContent = data.sleepUntil ? ("Wakes " + data.sleepUntil.replace("T", " ").slice(0, 19) + " UTC") : "";
+        return;
+      }
+      if (st === "downloading" || st === "dry-run") {
+        title.textContent = data.currentTitle || ("#" + data.currentId);
+        const done = data.downloadDone || 0;
+        const total = data.downloadTotal || 0;
+        meta.textContent = total
+          ? ("Downloading #" + data.currentId + " · page " + done + " / " + total)
+          : ("Fetching #" + data.currentId);
+        const p = total ? Math.round((done / total) * 100) : 8;
+        fill.style.width = p + "%";
+        bar.className = "bar warn";
+        pct.textContent = total ? (p + "% of this gallery") : "Starting download…";
+        return;
+      }
+      if (st === "searching") {
+        const page = data.searchPage || 0;
+        const pages = data.searchPages || 0;
+        title.textContent = pages ? ("Search page " + page + " / " + pages) : "Searching";
+        meta.textContent = (data.searchTotal ? (data.searchTotal.toLocaleString() + " galleries · ") : "")
+          + "streak " + (data.streak || 0)
+          + (data.catchUpStreak ? (" / " + data.catchUpStreak) : "")
+          + " already handled";
+        const p = pages ? Math.round((page / pages) * 100) : 0;
+        fill.style.width = Math.max(2, p) + "%";
+        bar.className = "bar warn";
+        pct.textContent = pages ? (p + "% of this cycle's search") : data.message || "";
+        return;
+      }
+      title.textContent = data.message || st;
+      meta.textContent = data.mode === "server" ? "Server mode" : "Client mode";
+      fill.style.width = st === "starting" ? "12%" : "0";
+      bar.className = "bar";
+      pct.textContent = "";
+    }
+
+    function paintRecent() {
+      const items = (data.recent || []).filter((e) => e.type === "wrote");
+      const ul = $("recent");
+      const empty = $("recentEmpty");
+      ul.innerHTML = items.slice(0, 8).map((e) =>
+        "<li><span class=\"id\">#" + esc(e.id) + "</span><span class=\"name\" title=\"" + esc(e.title) + "\">"
+        + esc(e.title) + "</span><span class=\"when\">" + esc(ago(e.at))
+        + (e.pages ? " · " + e.pages + "p" : "") + "</span></li>"
+      ).join("");
+      empty.classList.toggle("hidden", items.length > 0);
+    }
+
+    function paintLog() {
+      const rows = (data.log || []).map(parseLog).filter((r) => filter === "all" || r.level === filter);
+      const el = $("log");
+      const stick = autoBottom(el);
+      el.innerHTML = rows.map((r) =>
+        "<div class=\"row\"><span class=\"t\">" + esc(r.t) + "</span><span class=\"" + esc(r.level) + "\">"
+        + esc(r.level) + "</span><span>" + esc(r.msg) + "</span></div>"
+      ).join("") || "<div class=\"empty\">No log lines yet.</div>";
+      if (stick) el.scrollTop = el.scrollHeight;
+    }
+
+    function autoBottom(el) {
+      return el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+    }
+
+    function paint() {
+      if (!data) return;
+      $("badge").textContent = data.state || "unknown";
+      $("badge").className = "badge " + (data.state || "");
+      $("tags").textContent = data.tags || "Client mode — downloadme.txt only";
+      $("sLibrary").textContent = (data.libraryCount || 0).toLocaleString();
+      $("sAdded").textContent = String(data.addedThisCycle ?? data.downloaded ?? 0);
+      $("sSkipped").textContent = String(data.skippedThisCycle ?? data.skipped ?? 0);
+      $("sFailed").textContent = String(data.failedThisCycle ?? data.failed ?? 0);
+      $("sCycle").textContent = String(data.cycle || 0);
+      paintNow();
+      paintRecent();
+      paintLog();
+      tick();
+    }
+
+    async function poll() {
+      try {
+        const res = await fetch("/api/status", { cache: "no-store" });
+        data = await res.json();
+        paint();
+      } catch {
+        $("badge").textContent = "offline";
+        $("badge").className = "badge error";
+      }
+    }
+
+    document.querySelectorAll("[data-filter]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        filter = btn.getAttribute("data-filter");
+        document.querySelectorAll("[data-filter]").forEach((b) => b.classList.toggle("on", b === btn));
+        if (data) paintLog();
+      });
+    });
+    $("expand").addEventListener("click", () => {
+      logOpen = !logOpen;
+      $("log").classList.toggle("open", logOpen);
+      $("expand").textContent = logOpen ? "Collapse" : "Expand";
+    });
+    $("copy").addEventListener("click", async () => {
+      const text = (data?.log || []).join("\n");
+      try { await navigator.clipboard.writeText(text); $("copy").textContent = "Copied"; }
+      catch { $("copy").textContent = "Failed"; }
+      setTimeout(() => { $("copy").textContent = "Copy"; }, 1200);
+    });
+
+    poll();
+    setInterval(poll, 2000);
+    setInterval(tick, 1000);
+  </script>
+</body>
+</html>

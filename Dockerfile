@@ -8,7 +8,7 @@ WORKDIR /app
 COPY package.json ./
 RUN npm install --omit=dev
 
-COPY lib.mjs worker.mjs entrypoint.sh ./
+COPY lib.mjs worker.mjs dashboard.html entrypoint.sh ./
 RUN chmod +x /app/entrypoint.sh
 
 ENV LIBRARY_PATH=/app/hentai/ \

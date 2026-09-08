@@ -14,6 +14,7 @@ import { mkdir, readFile, readdir, rename, rm, stat, unlink, writeFile, appendFi
 import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import JSZip from "jszip";
 import {
   applySafety,
@@ -37,10 +38,10 @@ const DEFAULT_UA =
 const cfg = loadConfig();
 const UA = cfg.USER_AGENT || DEFAULT_UA;
 const logBuffer = [];
-const MAX_LOG = 400;
+const MAX_LOG = 800;
 
 const status = {
-  version: "2.0.1",
+  version: "2.1.0",
   mode: cfg.NHENTAI_TAGS ? "server" : "client",
   state: "starting",
   cycle: 0,
@@ -49,12 +50,23 @@ const status = {
   downloaded: 0,
   skipped: 0,
   failed: 0,
+  addedThisCycle: 0,
+  skippedThisCycle: 0,
+  failedThisCycle: 0,
   libraryCount: 0,
   lastCycleAt: null,
+  cycleStartedAt: null,
   sleepUntil: null,
   message: "",
   tags: cfg.NHENTAI_TAGS ? applySafety(cfg.NHENTAI_TAGS.join(" "), cfg.SAFETY_FILTER) : "",
   startedAt: new Date().toISOString(),
+  searchPage: 0,
+  searchPages: 0,
+  searchTotal: 0,
+  streak: 0,
+  downloadDone: 0,
+  downloadTotal: 0,
+  recent: [],
 };
 
 let shuttingDown = false;
@@ -86,6 +98,14 @@ async function main() {
     if (shuttingDown) break;
     status.cycle += 1;
     status.sleepUntil = null;
+    status.addedThisCycle = 0;
+    status.skippedThisCycle = 0;
+    status.failedThisCycle = 0;
+    status.searchPage = 0;
+    status.searchPages = 0;
+    status.streak = 0;
+    status.cycleStartedAt = new Date().toISOString();
+    status.state = "searching";
     try {
       await runCycle();
     } catch (err) {
@@ -99,7 +119,12 @@ async function main() {
     const until = new Date(Date.now() + seconds * 1000);
     status.state = "sleeping";
     status.sleepUntil = until.toISOString();
+    status.currentId = null;
+    status.currentTitle = "";
+    status.downloadDone = 0;
+    status.downloadTotal = 0;
     status.message = `Sleeping until ${until.toISOString()}`;
+    pushEvent("cycle", { title: `Cycle ${status.cycle} done` });
     log("info", `Cycle ${status.cycle} done. Sleeping ${seconds}s…`);
     await persistStatus();
     await sleep(seconds * 1000);
@@ -164,6 +189,9 @@ async function searchAndDownload(have, skip, cdn) {
     } catch (err) {
       if (err?.code === "RATE_LIMIT") {
         log("warn", "Search hit rate limit — stopping this cycle.");
+        status.state = "rate-limited";
+        status.message = "Rate limited — will sleep and retry next cycle";
+        pushEvent("rate", { title: "Search rate limited" });
         await writeDownloadme(collected);
         return;
       }
@@ -171,6 +199,11 @@ async function searchAndDownload(have, skip, cdn) {
     }
     pages = data.num_pages || 1;
     const rows = data.result || data.galleries || data.items || [];
+    status.searchPage = page;
+    status.searchPages = pages;
+    status.searchTotal = Number(data.total) || status.searchTotal;
+    status.state = "searching";
+    status.message = `Search page ${page}/${pages}`;
     if (page === 1) {
       log("info", `Search: ${data.total ?? rows.length} galleries across ${pages} pages`);
     }
@@ -186,19 +219,23 @@ async function searchAndDownload(have, skip, cdn) {
         if (skip.has(id)) pageSkip += 1;
         else pageHave += 1;
         status.skipped += 1;
+        status.skippedThisCycle += 1;
         streak += 1;
+        status.streak = streak;
         if (cfg.CATCH_UP_STREAK > 0 && streak >= cfg.CATCH_UP_STREAK) {
           log(
             "info",
             `Search page ${page}/${pages} — ${pageHave} in library, ${pageSkip} blacklisted, ${pageNew} new (streak ${streak})`,
           );
           log("info", `Caught up after ${streak} already-handled galleries. Stopping this cycle.`);
+          pushEvent("caught-up", { title: `Caught up after ${streak} already in library` });
           await writeDownloadme(collected);
           return;
         }
         continue;
       }
       streak = 0;
+      status.streak = 0;
       if (cfg.MAX_PER_CYCLE > 0 && added >= cfg.MAX_PER_CYCLE) {
         log("info", `MAX_PER_CYCLE=${cfg.MAX_PER_CYCLE} reached`);
         await writeDownloadme(collected);
@@ -208,6 +245,8 @@ async function searchAndDownload(have, skip, cdn) {
       try {
         const ok = await downloadGallery(id, cdn, have);
         if (ok) added += 1;
+        status.state = "searching";
+        status.message = `Search page ${page}/${pages}`;
       } catch (err) {
         if (err?.code === "RATE_LIMIT") {
           log("warn", "Rate limited while downloading — stopping this cycle.");
@@ -234,11 +273,13 @@ async function processIds(ids, have, skip, cdn) {
     if (skip.has(id)) {
       log("info", `#${id} blacklisted`);
       status.skipped += 1;
+      status.skippedThisCycle += 1;
       continue;
     }
     if (have.has(id)) {
       log("info", `#${id} already in library. Skipped.`);
       status.skipped += 1;
+      status.skippedThisCycle += 1;
       continue;
     }
     if (cfg.MAX_PER_CYCLE > 0 && added >= cfg.MAX_PER_CYCLE) {
@@ -260,6 +301,7 @@ async function downloadGallery(id, cdn, have) {
       log("warn", `#${id} skipped by safety filter`);
       await appendBlacklist(id);
       status.skipped += 1;
+      status.skippedThisCycle += 1;
       return false;
     }
     const filename = sanitizeFilename(id, pickTitle(gallery, cfg.FILENAME_TITLE_TYPE));
@@ -271,11 +313,14 @@ async function downloadGallery(id, cdn, have) {
       log("info", `Already have ${filename}`);
       have.add(id);
       status.skipped += 1;
+      status.skippedThisCycle += 1;
       return false;
     }
     if (cfg.DRY_RUN) {
       log("info", `DRY_RUN would write ${dest}`);
       status.downloaded += 1;
+      status.addedThisCycle += 1;
+      pushEvent("wrote", { id, title: filename, pages: gallery.num_pages || 0 });
       return true;
     }
 
@@ -283,10 +328,13 @@ async function downloadGallery(id, cdn, have) {
     if (!pages.length) throw new Error("Gallery has no pages");
     const tmpDir = join(cfg.LIBRARY_PATH, String(id));
     await mkdir(tmpDir, { recursive: true });
+    status.downloadDone = 0;
+    status.downloadTotal = pages.length;
 
     await mapPool(pages, cfg.DOWNLOAD_WORKERS, async (page) => {
       const bytes = await fetchImage(page.path, cdn.image_servers);
       await writeFile(join(tmpDir, pageFilename(id, page.number, page.path)), bytes);
+      status.downloadDone += 1;
     });
 
     const zip = new JSZip();
@@ -301,8 +349,10 @@ async function downloadGallery(id, cdn, have) {
     await rename(tmp, dest);
     have.add(id);
     status.downloaded += 1;
+    status.addedThisCycle += 1;
     status.libraryCount = have.size;
     log("info", `Wrote ${dest} (${pages.length} pages)`);
+    pushEvent("wrote", { id, title: filename, pages: pages.length });
     if (cfg.CLEANUP_TEMPORARY_FILES) {
       await rm(tmpDir, { recursive: true, force: true });
     }
@@ -310,7 +360,9 @@ async function downloadGallery(id, cdn, have) {
   } catch (err) {
     if (err?.code === "RATE_LIMIT") throw err;
     status.failed += 1;
+    status.failedThisCycle += 1;
     log("error", `#${id} ${err instanceof Error ? err.message : err}`);
+    pushEvent("error", { id, title: err instanceof Error ? err.message : String(err) });
     return false;
   }
 }
@@ -486,7 +538,42 @@ function loadConfig() {
   return loadConfigFrom({ ...file, ...process.env });
 }
 
+function pushEvent(type, data) {
+  status.recent.unshift({ type, at: new Date().toISOString(), ...data });
+  if (status.recent.length > 40) status.recent.length = 40;
+}
+
+function snapshot() {
+  return {
+    ...status,
+    log: logBuffer.slice(-200),
+    now: new Date().toISOString(),
+    rateLimitHits,
+    catchUpStreak: cfg.CATCH_UP_STREAK,
+    maxPerCycle: cfg.MAX_PER_CYCLE,
+    sleepSeconds: cfg.SLEEP_INTERVAL,
+    delayMs: cfg.REQUEST_DELAY_MS,
+  };
+}
+
+function dashboardPage() {
+  const candidates = [
+    join(dirname(fileURLToPath(import.meta.url)), "dashboard.html"),
+    "/app/dashboard.html",
+    "./dashboard.html",
+  ];
+  for (const p of candidates) {
+    try {
+      return readFileSync(p, "utf8");
+    } catch {
+      // try next
+    }
+  }
+  return "<!doctype html><title>Folio</title><p>dashboard.html missing. Try /api/status</p>";
+}
+
 function startStatusServer(port) {
+  const page = dashboardPage();
   const server = createServer((req, res) => {
     const url = req.url || "/";
     if (url.startsWith("/health")) {
@@ -494,10 +581,10 @@ function startStatusServer(port) {
       return;
     }
     if (url.startsWith("/api/status") || url.startsWith("/status.json")) {
-      json(res, 200, { ...status, log: logBuffer.slice(-80) });
+      json(res, 200, snapshot());
       return;
     }
-    html(res, 200, renderDashboard());
+    html(res, 200, page);
   });
   server.listen(port, "0.0.0.0", () => {
     log("info", `Status page on port ${port}`);
@@ -520,77 +607,10 @@ function html(res, code, body) {
   res.end(body);
 }
 
-function renderDashboard() {
-  const sleep = status.sleepUntil
-    ? `until ${escapeHtml(status.sleepUntil.replace("T", " ").slice(0, 19))} UTC`
-    : "—";
-  const rows = [
-    ["Mode", status.mode],
-    ["State", status.state],
-    ["Cycle", String(status.cycle)],
-    ["Library", `${status.libraryCount} CBZ`],
-    ["This run", `${status.downloaded} added · ${status.skipped} skipped · ${status.failed} failed`],
-    ["Current", status.currentId ? `#${status.currentId} ${status.currentTitle}` : "—"],
-    ["Tags", status.tags || "(client mode)"],
-    ["Sleep", sleep],
-    ["Started", status.startedAt.replace("T", " ").slice(0, 19) + " UTC"],
-  ];
-  const logLines = logBuffer
-    .slice(-80)
-    .map((line) => escapeHtml(line))
-    .join("\n");
-  return `<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <meta http-equiv="refresh" content="8"/>
-  <title>Folio · Archivist</title>
-  <style>
-    :root { color-scheme: dark; }
-    * { box-sizing: border-box; }
-    body { margin: 0; font-family: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif; background: #0b0c0e; color: #ece8e1; line-height: 1.5; }
-    main { max-width: 920px; margin: 0 auto; padding: 32px 20px 64px; }
-    .kicker { letter-spacing: .22em; text-transform: uppercase; color: #8a8680; font-size: 12px; }
-    h1 { font-family: Newsreader, Georgia, serif; font-weight: 500; font-size: 40px; margin: 4px 0 8px; letter-spacing: -0.02em; }
-    .lead { color: #8a8680; max-width: 40em; margin-bottom: 28px; }
-    .badge { display: inline-block; border: 1px solid rgba(236,232,225,.16); padding: 4px 10px; border-radius: 999px; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: #7f9a8f; }
-    dl { display: grid; grid-template-columns: 140px 1fr; gap: 10px 16px; margin: 0; padding: 20px; border: 1px solid rgba(236,232,225,.12); border-radius: 16px; background: #14161a; }
-    dt { color: #8a8680; font-size: 13px; }
-    dd { margin: 0; font-variant-numeric: tabular-nums; word-break: break-word; }
-    pre { margin-top: 24px; padding: 16px; border-radius: 16px; background: #14161a; border: 1px solid rgba(236,232,225,.12); overflow: auto; font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 12px; color: #cfc8be; min-height: 200px; }
-  </style>
-</head>
-<body>
-  <main>
-    <p class="kicker">Unraid worker</p>
-    <h1>Folio</h1>
-    <p class="lead">Searches nhentai API v2, writes missing CBZ files, skips what is already in the library, then sleeps and checks again.</p>
-    <p><span class="badge">${escapeHtml(status.state)}</span></p>
-    <dl>
-      ${rows.map(([k, v]) => `<dt>${escapeHtml(k)}</dt><dd>${escapeHtml(String(v))}</dd>`).join("")}
-    </dl>
-    <pre>${logLines || "Waiting for the first cycle…"}</pre>
-  </main>
-</body>
-</html>`;
-}
-
-function escapeHtml(s) {
-  return String(s)
-    .replaceAll("&", "&" + "amp;")
-    .replaceAll("<", "&" + "lt;")
-    .replaceAll(">", "&" + "gt;")
-    .replaceAll('"', "&" + "quot;");
-}
-
 async function persistStatus() {
   try {
     await mkdir("/app/log", { recursive: true });
-    await writeFile(
-      "/app/log/status.json",
-      JSON.stringify({ ...status, log: logBuffer.slice(-80) }, null, 2),
-    );
+    await writeFile("/app/log/status.json", JSON.stringify(snapshot(), null, 2));
   } catch {
     // running outside docker
   }

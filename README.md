@@ -22,6 +22,8 @@ GitHub Actions publishes `ghcr.io/valigha/folio-archivist:latest`.
 5. Set `NHENTAI_TAGS` and `SLEEP_INTERVAL` exactly like the old 9-FS container
 6. Apply. WebUI is port 8099.
 
+The status page is a live dashboard: countdown to the next run, search/download progress, recently written CBZs, and a filterable log (Expand / Copy, Info / Warn / Error).
+
 Make the GHCR package **public** the first time (GitHub → the repo → Packages) so Unraid can pull without a login.
 
 ## Environment
