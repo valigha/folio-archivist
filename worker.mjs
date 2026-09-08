@@ -41,7 +41,7 @@ const logBuffer = [];
 const MAX_LOG = 800;
 
 const status = {
-  version: "2.1.0",
+  version: "2.1.1",
   mode: cfg.NHENTAI_TAGS ? "server" : "client",
   state: "starting",
   cycle: 0,
@@ -67,6 +67,12 @@ const status = {
   downloadDone: 0,
   downloadTotal: 0,
   recent: [],
+  rateLimited: false,
+  rateLimitCount: 0,
+  rateLimitPath: "",
+  rateLimitAt: null,
+  rateLimitUntil: null,
+  rateLimitGaveUp: false,
 };
 
 let shuttingDown = false;
@@ -106,6 +112,8 @@ async function main() {
     status.streak = 0;
     status.cycleStartedAt = new Date().toISOString();
     status.state = "searching";
+    status.rateLimited = false;
+    status.rateLimitGaveUp = false;
     try {
       await runCycle();
     } catch (err) {
@@ -190,6 +198,7 @@ async function searchAndDownload(have, skip, cdn) {
       if (err?.code === "RATE_LIMIT") {
         log("warn", "Search hit rate limit — stopping this cycle.");
         status.state = "rate-limited";
+        status.rateLimitGaveUp = true;
         status.message = "Rate limited — will sleep and retry next cycle";
         pushEvent("rate", { title: "Search rate limited" });
         await writeDownloadme(collected);
@@ -426,9 +435,18 @@ async function api(path) {
       const wait = Number.isFinite(retryAfter) && retryAfter > 0
         ? retryAfter * 1000
         : Math.min(300_000, 15_000 * 2 ** i);
-      log("warn", `429 on ${path}, waiting ${Math.round(wait / 1000)}s (hit ${rateLimitHits})`);
       apiCooldownUntil = Date.now() + wait;
+      status.rateLimited = true;
+      status.rateLimitCount += 1;
+      status.rateLimitPath = String(path).split("?")[0] || path;
+      status.rateLimitAt = new Date().toISOString();
+      status.rateLimitUntil = new Date(apiCooldownUntil).toISOString();
+      log("warn", `429 on ${path}, waiting ${Math.round(wait / 1000)}s (hit ${rateLimitHits})`);
+      pushEvent("rate", { title: `429 ${status.rateLimitPath}`, path: status.rateLimitPath });
       if (rateLimitHits >= 6) {
+        status.rateLimitGaveUp = true;
+        status.state = "rate-limited";
+        status.message = `Giving up this cycle after ${rateLimitHits} rate limits`;
         const err = new Error(`Giving up this cycle after ${rateLimitHits} rate limits`);
         err.code = "RATE_LIMIT";
         throw err;
@@ -447,6 +465,7 @@ async function api(path) {
       throw new Error(`API ${res.status} ${path} ${body.slice(0, 180)}`);
     }
     if (rateLimitHits > 0) rateLimitHits = Math.max(0, rateLimitHits - 1);
+    if (Date.now() >= apiCooldownUntil) status.rateLimited = false;
     return res.json();
   }
   const err = new Error(`API failed ${path}`);

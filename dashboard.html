@@ -95,6 +95,33 @@
     .badge.searching, .badge.downloading { color: var(--warn); }
     .badge.sleeping { color: var(--accent); }
     .badge.rate-limited, .badge.error { color: var(--danger); }
+    .banner {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      margin: -4px 0 18px;
+      padding: 14px 18px;
+      border-radius: var(--radius);
+      border: 1px solid color-mix(in srgb, var(--danger) 50%, var(--line));
+      background: color-mix(in srgb, var(--danger) 16%, var(--surface));
+    }
+    .banner.cool {
+      border-color: color-mix(in srgb, var(--warn) 50%, var(--line));
+      background: color-mix(in srgb, var(--warn) 12%, var(--surface));
+    }
+    .banner.hidden { display: none; }
+    .banner strong { display: block; font-weight: 600; letter-spacing: 0.01em; }
+    .banner p { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+    .banner button {
+      flex-shrink: 0;
+      background: transparent;
+      color: var(--fg);
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 8px 14px;
+      font-size: 12px;
+    }
     .stats {
       display: grid;
       grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -240,6 +267,14 @@
       </div>
     </div>
 
+    <aside class="banner hidden" id="banner" role="status">
+      <div>
+        <strong id="bannerTitle">Rate limited</strong>
+        <p id="bannerBody"></p>
+      </div>
+      <button type="button" id="bannerHide">Hide</button>
+    </aside>
+
     <div class="stats">
       <div class="stat"><span>Library</span><b id="sLibrary">0</b></div>
       <div class="stat"><span>Added</span><b id="sAdded">0</b></div>
@@ -282,11 +317,16 @@
     let data = null;
     let filter = "all";
     let logOpen = false;
+    let bannerHiddenAt = 0;
     const $ = (id) => document.getElementById(id);
 
     function esc(s) {
       return String(s ?? "").replace(/[&<>"']/g, (c) => ({
-        "&": "&", "<": "<", ">": ">", '"': """, "'": "&#39;"
+        "&": "&" + "amp;",
+        "<": "&" + "lt;",
+        ">": "&" + "gt;",
+        '"': "&" + "quot;",
+        "'": "&#39;"
       }[c]));
     }
     function pad(n) { return String(n).padStart(2, "0"); }
@@ -307,6 +347,40 @@
       return { t: m[1].slice(11, 19), level: m[2].trim(), msg: m[3] };
     }
 
+    function paintBanner() {
+      const el = $("banner");
+      if (!data?.rateLimitAt) {
+        el.classList.add("hidden");
+        return;
+      }
+      const until = data.rateLimitUntil ? new Date(data.rateLimitUntil).getTime() : 0;
+      const active = data.rateLimited || data.state === "rate-limited" || Date.now() < until;
+      if (!active && bannerHiddenAt && new Date(data.rateLimitAt).getTime() <= bannerHiddenAt) {
+        el.classList.add("hidden");
+        return;
+      }
+      if (active) bannerHiddenAt = 0;
+      el.classList.remove("hidden");
+      el.classList.toggle("cool", !active);
+      const hits = data.rateLimitHits || 0;
+      const total = data.rateLimitCount || 0;
+      const path = data.rateLimitPath || "/search";
+      if (data.rateLimitGaveUp || data.state === "rate-limited") {
+        $("bannerTitle").textContent = "Rate limited — this cycle stopped";
+        $("bannerBody").textContent = total + " hits this session on " + path
+          + ". Waiting for the next run instead of hammering the API.";
+      } else if (active) {
+        const left = Math.max(0, until - Date.now());
+        $("bannerTitle").textContent = "429 from nhentai — backing off";
+        $("bannerBody").textContent = "Waiting " + hms(left) + " then retrying " + path
+          + " · " + hits + " in a row · " + total + " this session";
+      } else {
+        $("bannerTitle").textContent = "Last 429 · " + ago(data.rateLimitAt) + " ago";
+        $("bannerBody").textContent = path + " · " + total + " this session. Recovered — currently "
+          + (data.state || "running") + ".";
+      }
+    }
+
     function tick() {
       if (!data) return;
       const clock = $("clock");
@@ -322,6 +396,7 @@
         clock.textContent = hms(Date.now() - new Date(start).getTime());
         clock.className = "clock";
       }
+      paintBanner();
     }
 
     function paintNow() {
@@ -444,6 +519,10 @@
       try { await navigator.clipboard.writeText(text); $("copy").textContent = "Copied"; }
       catch { $("copy").textContent = "Failed"; }
       setTimeout(() => { $("copy").textContent = "Copy"; }, 1200);
+    });
+    $("bannerHide").addEventListener("click", () => {
+      bannerHiddenAt = Date.now();
+      $("banner").classList.add("hidden");
     });
 
     poll();
