@@ -1,0 +1,7 @@
+node_modules
+hentai
+log
+config/downloadme.txt
+*.cbz
+.git
+*.md

@@ -1,0 +1,1 @@
+# Blacklist gallery IDs, one per line.

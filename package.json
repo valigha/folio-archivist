@@ -1,0 +1,14 @@
+{
+  "name": "folio-archivist",
+  "private": true,
+  "type": "module",
+  "version": "2.0.0",
+  "description": "Unraid nhentai API v2 CBZ archivist — replacement for 9-FS/nhentai_archivist",
+  "scripts": {
+    "start": "node worker.mjs",
+    "test": "node --test lib.test.mjs"
+  },
+  "dependencies": {
+    "jszip": "^3.10.1"
+  }
+}
