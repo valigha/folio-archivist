@@ -1,0 +1,39 @@
+name: folio
+
+# Unraid: Docker -> Add Container, repository ghcr.io/valigha/folio-archivist:latest
+# or Compose Manager -> new project "folio" -> paste this file.
+
+services:
+  folio:
+    image: ghcr.io/valigha/folio-archivist:latest
+    pull_policy: always
+    container_name: folio
+    restart: unless-stopped
+    mem_limit: 1g
+    ports:
+      - "8099:8099"
+    environment:
+      PUID: "99"
+      PGID: "100"
+      UMASK: "002"
+      TZ: "America/New_York"
+      NHENTAI_TAGS: 'language:"english"'
+      SLEEP_INTERVAL: "3600"
+      LIBRARY_PATH: /app/hentai/
+      LIBRARY_SPLIT: "10000"
+      DOWNLOAD_WORKERS: "5"
+      DOWNLOADME_FILEPATH: /app/config/downloadme.txt
+      DONTDOWNLOADME_FILEPATH: /app/config/dontdownloadme.txt
+      FILENAME_TITLE_TYPE: English
+      CIRCUMVENT_LOAD_BALANCER: "true"
+      CLEANUP_TEMPORARY_FILES: "true"
+      SAFETY_FILTER: "true"
+      CATCH_UP_STREAK: "50"
+      MAX_PER_CYCLE: "0"
+      SEARCH_SORT: date
+      STATUS_PORT: "8099"
+      USER_AGENT: "Folio/1.0 (nhentai API v2 archivist; +https://nhentai.net/api/v2/docs)"
+    volumes:
+      - ./config:/app/config
+      - ./hentai:/app/hentai
+      - ./log:/app/log
