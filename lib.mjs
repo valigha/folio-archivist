@@ -205,6 +205,8 @@ export function loadConfigFrom(env) {
     RUN_ONCE: bool(env.RUN_ONCE, false),
     DEBUG: bool(env.DEBUG, false),
     STATUS_PORT: Math.max(0, num(env.STATUS_PORT, 8099)),
+    REQUEST_DELAY_MS: Math.max(0, num(env.REQUEST_DELAY_MS, 2000)),
+    MAX_SEARCH_PAGES: Math.max(0, num(env.MAX_SEARCH_PAGES, 0)),
     TZ: env.TZ || "",
   };
 }

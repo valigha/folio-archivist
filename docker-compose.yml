@@ -17,6 +17,8 @@ services:
       PGID: "100"
       UMASK: "002"
       TZ: "America/New_York"
+      # Server mode: set tags and the worker loops forever.
+      # Same syntax as the old 9-FS image: a query, or a list.
       NHENTAI_TAGS: 'language:"english"'
       SLEEP_INTERVAL: "3600"
       LIBRARY_PATH: /app/hentai/
@@ -28,12 +30,22 @@ services:
       CIRCUMVENT_LOAD_BALANCER: "true"
       CLEANUP_TEMPORARY_FILES: "true"
       SAFETY_FILTER: "true"
+      # Stop a cycle after this many already-archived galleries in a row (newest first).
+      # 0 = sweep the whole tag search every time, like the original.
       CATCH_UP_STREAK: "50"
+      # Optional cap per cycle. 0 = unlimited.
       MAX_PER_CYCLE: "0"
+      REQUEST_DELAY_MS: "2000"
       SEARCH_SORT: date
+      # RUN_ONCE: "true"   # one cycle then exit, for testing
       STATUS_PORT: "8099"
       USER_AGENT: "Folio/1.0 (nhentai API v2 archivist; +https://nhentai.net/api/v2/docs)"
+      # API_KEY: ""
     volumes:
+      # Unraid examples:
+      # - /mnt/user/appdata/folio/config:/app/config
+      # - /mnt/user/media/hentai:/app/hentai
+      # - /mnt/user/appdata/folio/log:/app/log
       - ./config:/app/config
       - ./hentai:/app/hentai
       - ./log:/app/log

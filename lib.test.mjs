@@ -69,7 +69,9 @@ test("loadConfigFrom server mode", () => {
   assert.equal(cfg.SLEEP_INTERVAL, 3600);
   assert.equal(cfg.LIBRARY_SPLIT, 10000);
   assert.equal(cfg.SAFETY_FILTER, true);
+  assert.equal(cfg.REQUEST_DELAY_MS, 2000);
   assert.equal(loadConfigFrom({}).NHENTAI_TAGS, null);
+  assert.equal(loadConfigFrom({ REQUEST_DELAY_MS: "1500" }).REQUEST_DELAY_MS, 1500);
 });
 
 test("galleryIsUnsafe", () => {

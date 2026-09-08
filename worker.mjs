@@ -4,11 +4,11 @@
  *
  * Same loop as 9-FS/nhentai_archivist:
  *   search tags (or read downloadme.txt)
- *   skip IDs already on disk / in dontdownloadme.txt
- *   write missing galleries as CBZ
- *   delete downloadme.txt so the next cycle re-searches
- *   sleep SLEEP_INTERVAL seconds
- *   repeat forever in server mode (NHENTAI_TAGS set)
+ *   → skip IDs already on disk / in dontdownloadme.txt
+ *   → write missing galleries as CBZ
+ *   → delete downloadme.txt so the next cycle re-searches
+ *   → sleep SLEEP_INTERVAL seconds
+ *   → repeat forever in server mode (NHENTAI_TAGS set)
  */
 import { mkdir, readFile, readdir, rename, rm, stat, unlink, writeFile, appendFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
@@ -40,7 +40,7 @@ const logBuffer = [];
 const MAX_LOG = 400;
 
 const status = {
-  version: "2.0.0",
+  version: "2.0.1",
   mode: cfg.NHENTAI_TAGS ? "server" : "client",
   state: "starting",
   cycle: 0,
@@ -60,6 +60,9 @@ const status = {
 let shuttingDown = false;
 let sleepTimer = null;
 let sleepResolve = null;
+let lastApiAt = 0;
+let apiCooldownUntil = 0;
+let rateLimitHits = 0;
 
 process.on("SIGTERM", onSignal);
 process.on("SIGINT", onSignal);
@@ -68,7 +71,7 @@ if (cfg.STATUS_PORT) startStatusServer(cfg.STATUS_PORT);
 
 log(
   "info",
-  `Folio worker ${status.mode} mode. library=${cfg.LIBRARY_PATH} split=${cfg.LIBRARY_SPLIT} sleep=${cfg.SLEEP_INTERVAL}s tags=${status.tags || "(none)"}`,
+  `Folio worker ${status.mode} mode. library=${cfg.LIBRARY_PATH} split=${cfg.LIBRARY_SPLIT} sleep=${cfg.SLEEP_INTERVAL}s delay=${cfg.REQUEST_DELAY_MS}ms tags=${status.tags || "(none)"}`,
 );
 
 await mkdir(cfg.LIBRARY_PATH, { recursive: true });
@@ -87,7 +90,9 @@ async function main() {
       await runCycle();
     } catch (err) {
       log("error", err instanceof Error ? err.message : String(err));
-      if (!cfg.NHENTAI_TAGS) process.exit(1);
+      if (err?.code === "RATE_LIMIT") {
+        log("warn", "Rate limited — ending this cycle early and sleeping.");
+      } else if (!cfg.NHENTAI_TAGS) process.exit(1);
     }
     if (!cfg.NHENTAI_TAGS || shuttingDown || cfg.RUN_ONCE) break;
     const seconds = cfg.SLEEP_INTERVAL || 3600;
@@ -95,7 +100,7 @@ async function main() {
     status.state = "sleeping";
     status.sleepUntil = until.toISOString();
     status.message = `Sleeping until ${until.toISOString()}`;
-    log("info", `Cycle ${status.cycle} done. Sleeping ${seconds}s`);
+    log("info", `Cycle ${status.cycle} done. Sleeping ${seconds}s…`);
     await persistStatus();
     await sleep(seconds * 1000);
   }
@@ -105,6 +110,7 @@ async function main() {
 }
 
 async function runCycle() {
+  rateLimitHits = 0;
   const have = await indexLibrary(cfg.LIBRARY_PATH);
   status.libraryCount = have.size;
   const skip = new Set(await readIdFile(cfg.DONTDOWNLOADME_FILEPATH));
@@ -132,7 +138,7 @@ async function searchAndDownload(have, skip, cdn) {
   const query = applySafety(cfg.NHENTAI_TAGS.join(" "), cfg.SAFETY_FILTER);
   status.state = "searching";
   status.message = `Searching: ${query}`;
-  log("info", `Searching ${query} sort=${cfg.SEARCH_SORT}`);
+  log("info", `Searching “${query}” sort=${cfg.SEARCH_SORT}`);
 
   let page = 1;
   let pages = 1;
@@ -141,33 +147,52 @@ async function searchAndDownload(have, skip, cdn) {
   const collected = [];
 
   while (page <= pages && !shuttingDown) {
-    const data = await api(
-      `/search?${new URLSearchParams({
-        query,
-        page: String(page),
-        sort: cfg.SEARCH_SORT || "date",
-      })}`,
-    );
+    if (cfg.MAX_SEARCH_PAGES > 0 && page > cfg.MAX_SEARCH_PAGES) {
+      log("info", `MAX_SEARCH_PAGES=${cfg.MAX_SEARCH_PAGES} reached`);
+      await writeDownloadme(collected);
+      return;
+    }
+    let data;
+    try {
+      data = await api(
+        `/search?${new URLSearchParams({
+          query,
+          page: String(page),
+          sort: cfg.SEARCH_SORT || "date",
+        })}`,
+      );
+    } catch (err) {
+      if (err?.code === "RATE_LIMIT") {
+        log("warn", "Search hit rate limit — stopping this cycle.");
+        await writeDownloadme(collected);
+        return;
+      }
+      throw err;
+    }
     pages = data.num_pages || 1;
-    const rows = data.result || [];
+    const rows = data.result || data.galleries || data.items || [];
     if (page === 1) {
       log("info", `Search: ${data.total ?? rows.length} galleries across ${pages} pages`);
     }
-    log("info", `Search page ${page}/${pages}`);
 
+    let pageHave = 0;
+    let pageSkip = 0;
+    let pageNew = 0;
     for (const item of rows) {
-      const id = Number(item.id);
+      const id = Number(item?.id ?? item?.gallery_id ?? item?.galleryId);
       if (!id) continue;
       collected.push(id);
-      if (skip.has(id)) {
-        status.skipped += 1;
-        continue;
-      }
-      if (have.has(id)) {
+      if (skip.has(id) || have.has(id)) {
+        if (skip.has(id)) pageSkip += 1;
+        else pageHave += 1;
         status.skipped += 1;
         streak += 1;
         if (cfg.CATCH_UP_STREAK > 0 && streak >= cfg.CATCH_UP_STREAK) {
-          log("info", `Caught up after ${streak} already-archived galleries. Stopping this cycle.`);
+          log(
+            "info",
+            `Search page ${page}/${pages} — ${pageHave} in library, ${pageSkip} blacklisted, ${pageNew} new (streak ${streak})`,
+          );
+          log("info", `Caught up after ${streak} already-handled galleries. Stopping this cycle.`);
           await writeDownloadme(collected);
           return;
         }
@@ -179,9 +204,23 @@ async function searchAndDownload(have, skip, cdn) {
         await writeDownloadme(collected);
         return;
       }
-      const ok = await downloadGallery(id, cdn, have);
-      if (ok) added += 1;
+      pageNew += 1;
+      try {
+        const ok = await downloadGallery(id, cdn, have);
+        if (ok) added += 1;
+      } catch (err) {
+        if (err?.code === "RATE_LIMIT") {
+          log("warn", "Rate limited while downloading — stopping this cycle.");
+          await writeDownloadme(collected);
+          return;
+        }
+        throw err;
+      }
     }
+    log(
+      "info",
+      `Search page ${page}/${pages} — ${pageHave} in library, ${pageSkip} blacklisted, ${pageNew} new (streak ${streak})`,
+    );
     page += 1;
   }
   await writeDownloadme(collected);
@@ -269,6 +308,7 @@ async function downloadGallery(id, cdn, have) {
     }
     return true;
   } catch (err) {
+    if (err?.code === "RATE_LIMIT") throw err;
     status.failed += 1;
     log("error", `#${id} ${err instanceof Error ? err.message : err}`);
     return false;
@@ -310,6 +350,14 @@ async function fetchCdn() {
   return FALLBACK_CDN;
 }
 
+async function throttleApi() {
+  const now = Date.now();
+  const waitUntil = Math.max(apiCooldownUntil, lastApiAt + (cfg.REQUEST_DELAY_MS || 0));
+  const wait = waitUntil - now;
+  if (wait > 0) await sleep(wait);
+  lastApiAt = Date.now();
+}
+
 async function api(path) {
   const headers = {
     "User-Agent": UA,
@@ -317,11 +365,28 @@ async function api(path) {
   };
   if (cfg.API_KEY) headers.Authorization = `Key ${cfg.API_KEY}`;
   if (cfg.COOKIE) headers.Cookie = cfg.COOKIE;
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < 8; i++) {
+    await throttleApi();
     const res = await fetch(`${API}${path}`, { headers });
     if (res.status === 429) {
-      const wait = 2000 * (i + 1);
-      log("warn", `429 on ${path}, waiting ${wait}ms`);
+      rateLimitHits += 1;
+      const retryAfter = Number(res.headers.get("retry-after"));
+      const wait = Number.isFinite(retryAfter) && retryAfter > 0
+        ? retryAfter * 1000
+        : Math.min(300_000, 15_000 * 2 ** i);
+      log("warn", `429 on ${path}, waiting ${Math.round(wait / 1000)}s (hit ${rateLimitHits})`);
+      apiCooldownUntil = Date.now() + wait;
+      if (rateLimitHits >= 6) {
+        const err = new Error(`Giving up this cycle after ${rateLimitHits} rate limits`);
+        err.code = "RATE_LIMIT";
+        throw err;
+      }
+      await sleep(wait);
+      continue;
+    }
+    if (res.status === 503 || res.status === 502) {
+      const wait = Math.min(120_000, 5000 * 2 ** i);
+      log("warn", `${res.status} on ${path}, waiting ${Math.round(wait / 1000)}s`);
       await sleep(wait);
       continue;
     }
@@ -329,9 +394,12 @@ async function api(path) {
       const body = await res.text().catch(() => "");
       throw new Error(`API ${res.status} ${path} ${body.slice(0, 180)}`);
     }
+    if (rateLimitHits > 0) rateLimitHits = Math.max(0, rateLimitHits - 1);
     return res.json();
   }
-  throw new Error(`API failed ${path}`);
+  const err = new Error(`API failed ${path}`);
+  err.code = "RATE_LIMIT";
+  throw err;
 }
 
 function imageHeaders() {
@@ -455,14 +523,14 @@ function html(res, code, body) {
 function renderDashboard() {
   const sleep = status.sleepUntil
     ? `until ${escapeHtml(status.sleepUntil.replace("T", " ").slice(0, 19))} UTC`
-    : "-";
+    : "—";
   const rows = [
     ["Mode", status.mode],
     ["State", status.state],
     ["Cycle", String(status.cycle)],
     ["Library", `${status.libraryCount} CBZ`],
-    ["This run", `${status.downloaded} added / ${status.skipped} skipped / ${status.failed} failed`],
-    ["Current", status.currentId ? `#${status.currentId} ${status.currentTitle}` : "-"],
+    ["This run", `${status.downloaded} added · ${status.skipped} skipped · ${status.failed} failed`],
+    ["Current", status.currentId ? `#${status.currentId} ${status.currentTitle}` : "—"],
     ["Tags", status.tags || "(client mode)"],
     ["Sleep", sleep],
     ["Started", status.startedAt.replace("T", " ").slice(0, 19) + " UTC"],
@@ -477,20 +545,20 @@ function renderDashboard() {
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta http-equiv="refresh" content="8"/>
-  <title>Folio Archivist</title>
+  <title>Folio · Archivist</title>
   <style>
     :root { color-scheme: dark; }
     * { box-sizing: border-box; }
-    body { margin: 0; font-family: ui-sans-serif, system-ui, sans-serif; background: #0b0c0e; color: #ece8e1; line-height: 1.5; }
+    body { margin: 0; font-family: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif; background: #0b0c0e; color: #ece8e1; line-height: 1.5; }
     main { max-width: 920px; margin: 0 auto; padding: 32px 20px 64px; }
     .kicker { letter-spacing: .22em; text-transform: uppercase; color: #8a8680; font-size: 12px; }
-    h1 { font-weight: 500; font-size: 40px; margin: 4px 0 8px; letter-spacing: -0.02em; }
+    h1 { font-family: Newsreader, Georgia, serif; font-weight: 500; font-size: 40px; margin: 4px 0 8px; letter-spacing: -0.02em; }
     .lead { color: #8a8680; max-width: 40em; margin-bottom: 28px; }
     .badge { display: inline-block; border: 1px solid rgba(236,232,225,.16); padding: 4px 10px; border-radius: 999px; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: #7f9a8f; }
     dl { display: grid; grid-template-columns: 140px 1fr; gap: 10px 16px; margin: 0; padding: 20px; border: 1px solid rgba(236,232,225,.12); border-radius: 16px; background: #14161a; }
     dt { color: #8a8680; font-size: 13px; }
     dd { margin: 0; font-variant-numeric: tabular-nums; word-break: break-word; }
-    pre { margin-top: 24px; padding: 16px; border-radius: 16px; background: #14161a; border: 1px solid rgba(236,232,225,.12); overflow: auto; font-family: ui-monospace, monospace; font-size: 12px; color: #cfc8be; min-height: 200px; }
+    pre { margin-top: 24px; padding: 16px; border-radius: 16px; background: #14161a; border: 1px solid rgba(236,232,225,.12); overflow: auto; font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 12px; color: #cfc8be; min-height: 200px; }
   </style>
 </head>
 <body>
@@ -502,7 +570,7 @@ function renderDashboard() {
     <dl>
       ${rows.map(([k, v]) => `<dt>${escapeHtml(k)}</dt><dd>${escapeHtml(String(v))}</dd>`).join("")}
     </dl>
-    <pre>${logLines || "Waiting for the first cycle"}</pre>
+    <pre>${logLines || "Waiting for the first cycle…"}</pre>
   </main>
 </body>
 </html>`;
