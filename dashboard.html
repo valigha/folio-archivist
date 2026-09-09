@@ -94,6 +94,7 @@
     }
     .badge.searching, .badge.downloading { color: var(--warn); }
     .badge.sleeping { color: var(--accent); }
+    .badge.paused, .badge.idle { color: var(--muted); }
     .badge.rate-limited, .badge.error { color: var(--danger); }
     .banner {
       display: flex;
@@ -240,6 +241,112 @@
     .log .WARN { color: var(--warn); }
     .log .ERROR { color: var(--danger); }
     .hidden { display: none; }
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      margin: 0 0 16px;
+    }
+    .controls button {
+      background: var(--surface);
+      color: var(--fg);
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 10px 18px;
+      font-size: 13px;
+      letter-spacing: 0.04em;
+    }
+    .controls button.primary {
+      background: var(--accent);
+      color: #0b0c0e;
+      border-color: var(--accent);
+      font-weight: 600;
+    }
+    .controls button:disabled { opacity: 0.45; cursor: default; }
+    .controls .hint { color: var(--muted); font-size: 13px; }
+    .query-card { margin-bottom: 14px; }
+    .chips { display: flex; flex-wrap: wrap; gap: 8px; min-height: 36px; }
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 5px 6px 5px 12px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: var(--surface-2);
+      font-size: 13px;
+    }
+    .chip.ex { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, var(--line)); }
+    .chip .ns, .suggest .ns {
+      color: var(--muted);
+      font-size: 11px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+    .chip button {
+      background: transparent;
+      color: var(--muted);
+      border: 0;
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      font-size: 16px;
+      line-height: 1;
+    }
+    .search-row { display: flex; gap: 8px; margin-top: 14px; }
+    .search-row select, .search-row input {
+      background: var(--surface-2);
+      color: var(--fg);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 10px 12px;
+      font: inherit;
+    }
+    .search-row input { flex: 1; min-width: 0; }
+    .suggest {
+      list-style: none;
+      margin: 8px 0 0;
+      padding: 0;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--surface-2);
+      overflow: hidden;
+      display: none;
+    }
+    .suggest.open { display: block; }
+    .suggest li {
+      display: grid;
+      grid-template-columns: 1fr auto auto auto;
+      gap: 8px;
+      align-items: center;
+      padding: 8px 12px;
+      border-top: 1px solid var(--line);
+      font-size: 13px;
+    }
+    .suggest li:first-child { border-top: 0; }
+    .suggest .count { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12px; }
+    .suggest button {
+      background: transparent;
+      color: var(--accent);
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 4px 10px;
+      font-size: 12px;
+    }
+    .suggest button.ex { color: var(--danger); }
+    .cycles { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .cycles th {
+      text-align: left;
+      color: var(--muted);
+      font-weight: 500;
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      padding: 6px 8px;
+    }
+    .cycles td { padding: 8px; border-top: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+    .cycles .bad { color: var(--danger); }
     @media (max-width: 860px) {
       .stats { grid-template-columns: repeat(2, 1fr); }
       .grid, .clock-wrap { display: block; }
@@ -275,6 +382,12 @@
       <button type="button" id="bannerHide">Hide</button>
     </aside>
 
+    <div class="controls">
+      <button type="button" id="btnPause">Pause</button>
+      <button type="button" class="primary" id="btnRun">Run now</button>
+      <span class="hint" id="controlHint">Changes apply on the next cycle.</span>
+    </div>
+
     <div class="stats">
       <div class="stat"><span>Library</span><b id="sLibrary">0</b></div>
       <div class="stat"><span>Added</span><b id="sAdded">0</b></div>
@@ -282,6 +395,27 @@
       <div class="stat"><span>Failed</span><b id="sFailed">0</b></div>
       <div class="stat"><span>Cycle</span><b id="sCycle">0</b></div>
     </div>
+
+    <section class="card query-card">
+      <h2>Search query</h2>
+      <p class="now-meta">Chips are filters. Include or exclude tags from nhentai’s list. Saved instantly — click Run now to use them without restarting the container.</p>
+      <div class="chips" id="chips"></div>
+      <div class="search-row">
+        <select id="tagType" aria-label="Tag type">
+          <option value="all">All types</option>
+          <option value="tag">tag</option>
+          <option value="artist">artist</option>
+          <option value="parody">parody</option>
+          <option value="character">character</option>
+          <option value="language">language</option>
+          <option value="group">group</option>
+          <option value="category">category</option>
+        </select>
+        <input id="tagQ" type="search" autocomplete="off" placeholder="Search nhentai tags — e.g. english, unbirth, shindol"/>
+      </div>
+      <ul class="suggest" id="suggest"></ul>
+      <p class="now-meta" id="effective"></p>
+    </section>
 
     <div class="grid">
       <section class="card">
@@ -297,6 +431,17 @@
         <p class="empty" id="recentEmpty">Nothing written this session yet.</p>
       </section>
     </div>
+
+    <section class="card">
+      <h2>Last cycles</h2>
+      <table class="cycles">
+        <thead>
+          <tr><th>#</th><th>When</th><th>Added</th><th>Skipped</th><th>Failed</th><th>Search</th><th>Ended</th></tr>
+        </thead>
+        <tbody id="cycles"></tbody>
+      </table>
+      <p class="empty" id="cyclesEmpty">No finished cycles yet.</p>
+    </section>
 
     <section class="log-wrap">
       <div class="log-head">
@@ -385,7 +530,11 @@
       if (!data) return;
       const clock = $("clock");
       const label = $("clockLabel");
-      if (data.state === "sleeping" && data.sleepUntil) {
+      if (data.paused || data.state === "paused") {
+        label.textContent = "Paused";
+        clock.textContent = "hold";
+        clock.className = "clock";
+      } else if (data.state === "sleeping" && data.sleepUntil) {
         const left = new Date(data.sleepUntil).getTime() - Date.now();
         label.textContent = "Next run in";
         clock.textContent = hms(left);
@@ -406,6 +555,22 @@
       const fill = $("barFill");
       const pct = $("pct");
       const st = data.state;
+      if (st === "paused" || data.paused && st !== "downloading") {
+        title.textContent = "Paused";
+        meta.textContent = "Current gallery will finish. Click Run now when you want the next cycle.";
+        fill.style.width = "0";
+        bar.className = "bar";
+        pct.textContent = "";
+        if (st !== "downloading") return;
+      }
+      if (st === "idle") {
+        title.textContent = "Waiting for a query";
+        meta.textContent = "Add tag chips below, then Run now.";
+        fill.style.width = "0";
+        bar.className = "bar";
+        pct.textContent = "";
+        return;
+      }
       if (st === "sleeping") {
         title.textContent = "Sleeping until next search";
         meta.textContent = data.message || "Waiting for SLEEP_INTERVAL.";
@@ -475,11 +640,133 @@
       return el.scrollHeight - el.scrollTop - el.clientHeight < 48;
     }
 
+    function parseTerm(raw) {
+      const t = String(raw || "").trim();
+      const exclude = t.startsWith("-");
+      const body = exclude ? t.slice(1) : t;
+      const m = body.match(/^([a-z]+):"?([^"]+)"?$/i);
+      if (m) return { raw: t, exclude, type: m[1], name: m[2] };
+      return { raw: t, exclude, type: "tag", name: body };
+    }
+    function formatTerm(type, name, exclude) {
+      const n = String(name).trim();
+      const body = type + ":\"" + n + "\"";
+      return exclude ? "-" + body : body;
+    }
+    async function postJSON(path, body) {
+      const res = await fetch(path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || res.status);
+      data = json;
+      paint();
+      return json;
+    }
+    async function saveTags(next) {
+      $("controlHint").textContent = "Saving…";
+      try {
+        await postJSON("/api/config", { tags: next });
+        $("controlHint").textContent = "Saved. Applies on the next cycle — or click Run now.";
+      } catch (err) {
+        $("controlHint").textContent = err.message || "Save failed";
+      }
+    }
+    function paintChips() {
+      const list = data.tagList || [];
+      const el = $("chips");
+      if (!list.length) {
+        el.innerHTML = "<span class=\"empty\">No chips yet. Search below and Include / Exclude.</span>";
+      } else {
+        el.innerHTML = list.map((raw, i) => {
+          const t = parseTerm(raw);
+          return "<span class=\"chip" + (t.exclude ? " ex" : "") + "\"><span class=\"ns\">"
+            + (t.exclude ? "not " : "") + esc(t.type) + "</span><span>"
+            + esc(t.name) + "</span><button type=\"button\" data-rm=\"" + i + "\" aria-label=\"Remove\">×</button></span>";
+        }).join("");
+        el.querySelectorAll("[data-rm]").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            const next = list.slice();
+            next.splice(Number(btn.getAttribute("data-rm")), 1);
+            saveTags(next);
+          });
+        });
+      }
+      $("effective").textContent = data.tags
+        ? ("Effective search: " + data.tags)
+        : "Safety filter still appends illegal-tag excludes when enabled.";
+    }
+    function paintCycles() {
+      const rows = data.cycles || [];
+      $("cyclesEmpty").classList.toggle("hidden", rows.length > 0);
+      $("cycles").innerHTML = rows.map((c) => {
+        const when = (c.ended || c.at || "").replace("T", " ").slice(0, 16);
+        const search = c.pages ? ((c.page || 0) + "/" + c.pages) : "—";
+        const reason = c.rateLimited ? "429" : (c.reason || "");
+        return "<tr><td>" + esc(c.n) + "</td><td>" + esc(when)
+          + "</td><td>" + esc(c.added) + "</td><td>" + esc(c.skipped) + "</td><td>"
+          + esc(c.failed) + "</td><td>" + esc(search) + "</td><td class=\""
+          + (c.rateLimited ? "bad" : "") + "\">" + esc(reason) + "</td></tr>";
+      }).join("");
+    }
+    function paintControls() {
+      const running = data.state === "searching" || data.state === "downloading";
+      $("btnPause").disabled = Boolean(data.paused) || data.state === "paused" || data.state === "idle";
+      $("btnRun").disabled = running && !data.paused;
+      if (data.paused || data.state === "paused") $("btnRun").disabled = false;
+    }
+    let suggestTimer = 0;
+    async function searchTags() {
+      const q = $("tagQ").value.trim();
+      const box = $("suggest");
+      if (q.length < 2) { box.classList.remove("open"); box.innerHTML = ""; return; }
+      try {
+        const type = $("tagType").value;
+        const url = "/api/tags?q=" + encodeURIComponent(q) + "&type=" + encodeURIComponent(type);
+        const res = await fetch(url, { cache: "no-store" });
+        const json = await res.json();
+        const rows = json.result || [];
+        if (!rows.length) {
+          box.innerHTML = "<li><span>No tags match</span></li>";
+          box.classList.add("open");
+          return;
+        }
+        box.innerHTML = rows.map((t) =>
+          "<li><span><span class=\"ns\">" + esc(t.type) + "</span> " + esc(t.name)
+          + "</span><span class=\"count\">" + Number(t.count || 0).toLocaleString()
+          + "</span><button type=\"button\" data-inc=\"" + esc(t.type) + "\" data-name=\""
+          + esc(t.name) + "\">Include</button><button type=\"button\" class=\"ex\" data-ex=\""
+          + esc(t.type) + "\" data-name=\"" + esc(t.name) + "\">Exclude</button></li>"
+        ).join("");
+        box.classList.add("open");
+        box.querySelectorAll("button").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            const type = btn.getAttribute("data-inc") || btn.getAttribute("data-ex");
+            const name = btn.getAttribute("data-name");
+            const exclude = btn.hasAttribute("data-ex");
+            const term = formatTerm(type, name, exclude);
+            const next = (data.tagList || []).filter((x) => x !== term && x !== formatTerm(type, name, !exclude));
+            next.push(term);
+            saveTags(next);
+            $("tagQ").value = "";
+            box.classList.remove("open");
+          });
+        });
+      } catch {
+        box.innerHTML = "<li><span>Tag search failed (maybe rate limited)</span></li>";
+        box.classList.add("open");
+      }
+    }
+
     function paint() {
       if (!data) return;
       $("badge").textContent = data.state || "unknown";
       $("badge").className = "badge " + (data.state || "");
-      $("tags").textContent = data.tags || "Client mode — downloadme.txt only";
+      $("tags").textContent = (data.tagList && data.tagList.length)
+        ? (data.tagList.length + " chip" + (data.tagList.length === 1 ? "" : "s"))
+        : "No query yet";
       $("sLibrary").textContent = (data.libraryCount || 0).toLocaleString();
       $("sAdded").textContent = String(data.addedThisCycle ?? data.downloaded ?? 0);
       $("sSkipped").textContent = String(data.skippedThisCycle ?? data.skipped ?? 0);
@@ -488,6 +775,9 @@
       paintNow();
       paintRecent();
       paintLog();
+      paintChips();
+      paintCycles();
+      paintControls();
       tick();
     }
 
@@ -523,6 +813,30 @@
     $("bannerHide").addEventListener("click", () => {
       bannerHiddenAt = Date.now();
       $("banner").classList.add("hidden");
+    });
+    $("btnPause").addEventListener("click", () => {
+      $("controlHint").textContent = "Pausing after this gallery…";
+      postJSON("/api/control", { action: "pause" }).catch((e) => {
+        $("controlHint").textContent = e.message;
+      });
+    });
+    $("btnRun").addEventListener("click", () => {
+      $("controlHint").textContent = "Starting…";
+      postJSON("/api/control", { action: "run" }).catch((e) => {
+        $("controlHint").textContent = e.message;
+      });
+    });
+    $("tagQ").addEventListener("input", () => {
+      clearTimeout(suggestTimer);
+      suggestTimer = setTimeout(searchTags, 350);
+    });
+    $("tagType").addEventListener("change", () => {
+      if ($("tagQ").value.trim().length >= 2) searchTags();
+    });
+    document.addEventListener("click", (e) => {
+      if (!$("suggest").contains(e.target) && e.target !== $("tagQ")) {
+        $("suggest").classList.remove("open");
+      }
     });
 
     poll();

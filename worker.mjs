@@ -41,7 +41,7 @@ const logBuffer = [];
 const MAX_LOG = 800;
 
 const status = {
-  version: "2.1.1",
+  version: "2.2.0",
   mode: cfg.NHENTAI_TAGS ? "server" : "client",
   state: "starting",
   cycle: 0,
@@ -73,6 +73,10 @@ const status = {
   rateLimitAt: null,
   rateLimitUntil: null,
   rateLimitGaveUp: false,
+  paused: false,
+  cycleReason: "",
+  tagList: [],
+  cycles: [],
 };
 
 let shuttingDown = false;
@@ -81,9 +85,22 @@ let sleepResolve = null;
 let lastApiAt = 0;
 let apiCooldownUntil = 0;
 let rateLimitHits = 0;
+let liveTags = cfg.NHENTAI_TAGS ? [...cfg.NHENTAI_TAGS] : [];
+let paused = false;
+let runNow = false;
+let abortCycle = false;
+let cycles = [];
 
 process.on("SIGTERM", onSignal);
 process.on("SIGINT", onSignal);
+
+await mkdir(cfg.LIBRARY_PATH, { recursive: true });
+await mkdir(dirname(cfg.DOWNLOADME_FILEPATH), { recursive: true }).catch(() => {});
+await mkdir(dirname(cfg.DONTDOWNLOADME_FILEPATH), { recursive: true }).catch(() => {});
+await mkdir("/app/log", { recursive: true }).catch(() => {});
+loadLive();
+loadCycles();
+syncTagStatus();
 
 if (cfg.STATUS_PORT) startStatusServer(cfg.STATUS_PORT);
 
@@ -92,16 +109,28 @@ log(
   `Folio worker ${status.mode} mode. library=${cfg.LIBRARY_PATH} split=${cfg.LIBRARY_SPLIT} sleep=${cfg.SLEEP_INTERVAL}s delay=${cfg.REQUEST_DELAY_MS}ms tags=${status.tags || "(none)"}`,
 );
 
-await mkdir(cfg.LIBRARY_PATH, { recursive: true });
-await mkdir(dirname(cfg.DOWNLOADME_FILEPATH), { recursive: true }).catch(() => {});
-await mkdir(dirname(cfg.DONTDOWNLOADME_FILEPATH), { recursive: true }).catch(() => {});
-await mkdir("/app/log", { recursive: true }).catch(() => {});
-
 await main();
 
 async function main() {
   for (;;) {
     if (shuttingDown) break;
+    await waitWhilePaused();
+    if (shuttingDown) break;
+    if (!liveTags.length) {
+      const queued = await readIdFile(cfg.DOWNLOADME_FILEPATH);
+      if (!queued.length) {
+        status.state = "idle";
+        status.sleepUntil = null;
+        status.message = "No tags set — add chips below, then Run now";
+        paused = true;
+        status.paused = true;
+        await saveLive();
+        await persistStatus();
+        continue;
+      }
+    }
+    runNow = false;
+    abortCycle = false;
     status.cycle += 1;
     status.sleepUntil = null;
     status.addedThisCycle = 0;
@@ -110,6 +139,7 @@ async function main() {
     status.searchPage = 0;
     status.searchPages = 0;
     status.streak = 0;
+    status.cycleReason = "";
     status.cycleStartedAt = new Date().toISOString();
     status.state = "searching";
     status.rateLimited = false;
@@ -119,10 +149,13 @@ async function main() {
     } catch (err) {
       log("error", err instanceof Error ? err.message : String(err));
       if (err?.code === "RATE_LIMIT") {
-        log("warn", "Rate limited — ending this cycle early and sleeping.");
-      } else if (!cfg.NHENTAI_TAGS) process.exit(1);
+        status.cycleReason = "rate-limit";
+        log("warn", "Rate limited — ending this cycle early.");
+      } else if (!liveTags.length && !cfg.NHENTAI_TAGS) process.exit(1);
     }
-    if (!cfg.NHENTAI_TAGS || shuttingDown || cfg.RUN_ONCE) break;
+    recordCycle();
+    if (cfg.RUN_ONCE || shuttingDown) break;
+    if (paused) continue;
     const seconds = cfg.SLEEP_INTERVAL || 3600;
     const until = new Date(Date.now() + seconds * 1000);
     status.state = "sleeping";
@@ -136,9 +169,10 @@ async function main() {
     log("info", `Cycle ${status.cycle} done. Sleeping ${seconds}s…`);
     await persistStatus();
     await sleep(seconds * 1000);
+    if (paused) continue;
   }
   status.state = "stopped";
-  status.message = shuttingDown ? "Stopped" : "Client mode finished";
+  status.message = shuttingDown ? "Stopped" : "Finished";
   await persistStatus();
 }
 
@@ -153,7 +187,7 @@ async function runCycle() {
   if (fromFile.length) {
     log("info", `Loaded ${fromFile.length} IDs from ${cfg.DOWNLOADME_FILEPATH}`);
     await processIds(fromFile, have, skip, cdn);
-  } else if (cfg.NHENTAI_TAGS?.length) {
+  } else if (liveTags.length) {
     await searchAndDownload(have, skip, cdn);
   } else {
     log("info", "No NHENTAI_TAGS and no downloadme.txt — nothing to do");
@@ -168,7 +202,8 @@ async function runCycle() {
 }
 
 async function searchAndDownload(have, skip, cdn) {
-  const query = applySafety(cfg.NHENTAI_TAGS.join(" "), cfg.SAFETY_FILTER);
+  if (!liveTags.length) return;
+  const query = applySafety(liveTags.join(" "), cfg.SAFETY_FILTER);
   status.state = "searching";
   status.message = `Searching: ${query}`;
   log("info", `Searching “${query}” sort=${cfg.SEARCH_SORT}`);
@@ -180,6 +215,12 @@ async function searchAndDownload(have, skip, cdn) {
   const collected = [];
 
   while (page <= pages && !shuttingDown) {
+    if (paused || abortCycle) {
+      status.cycleReason = paused ? "paused" : "aborted";
+      log("info", paused ? "Paused — finishing this cycle" : "Cycle aborted");
+      await writeDownloadme(collected);
+      return;
+    }
     if (cfg.MAX_SEARCH_PAGES > 0 && page > cfg.MAX_SEARCH_PAGES) {
       log("info", `MAX_SEARCH_PAGES=${cfg.MAX_SEARCH_PAGES} reached`);
       await writeDownloadme(collected);
@@ -237,6 +278,7 @@ async function searchAndDownload(have, skip, cdn) {
             `Search page ${page}/${pages} — ${pageHave} in library, ${pageSkip} blacklisted, ${pageNew} new (streak ${streak})`,
           );
           log("info", `Caught up after ${streak} already-handled galleries. Stopping this cycle.`);
+          status.cycleReason = "caught-up";
           pushEvent("caught-up", { title: `Caught up after ${streak} already in library` });
           await writeDownloadme(collected);
           return;
@@ -247,6 +289,7 @@ async function searchAndDownload(have, skip, cdn) {
       status.streak = 0;
       if (cfg.MAX_PER_CYCLE > 0 && added >= cfg.MAX_PER_CYCLE) {
         log("info", `MAX_PER_CYCLE=${cfg.MAX_PER_CYCLE} reached`);
+        status.cycleReason = "max";
         await writeDownloadme(collected);
         return;
       }
@@ -272,6 +315,7 @@ async function searchAndDownload(have, skip, cdn) {
     page += 1;
   }
   await writeDownloadme(collected);
+  if (!status.cycleReason) status.cycleReason = "complete";
 }
 
 async function processIds(ids, have, skip, cdn) {
@@ -557,6 +601,192 @@ function loadConfig() {
   return loadConfigFrom({ ...file, ...process.env });
 }
 
+function liveConfigPath() {
+  return (
+    process.env.FOLIO_CONFIG ||
+    join(dirname(cfg.DOWNLOADME_FILEPATH || "./config/downloadme.txt"), "folio.json")
+  );
+}
+
+function cyclesPath() {
+  return "/app/log/cycles.json";
+}
+
+function syncTagStatus() {
+  status.tagList = [...liveTags];
+  status.tags = liveTags.length ? applySafety(liveTags.join(" "), cfg.SAFETY_FILTER) : "";
+  status.mode = liveTags.length ? "server" : "client";
+  status.paused = paused;
+}
+
+function loadLive() {
+  try {
+    const j = JSON.parse(readFileSync(liveConfigPath(), "utf8"));
+    if (Array.isArray(j.tags)) {
+      liveTags = j.tags.map((s) => String(s).trim()).filter(Boolean);
+    }
+    if (typeof j.paused === "boolean") paused = j.paused;
+  } catch {
+    // first run: seed from Unraid env
+  }
+  syncTagStatus();
+}
+
+async function saveLive() {
+  try {
+    const path = liveConfigPath();
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, JSON.stringify({ tags: liveTags, paused }, null, 2) + "\n");
+  } catch (err) {
+    log("warn", `Could not save folio.json: ${err instanceof Error ? err.message : err}`);
+  }
+  syncTagStatus();
+}
+
+function loadCycles() {
+  try {
+    const rows = JSON.parse(readFileSync(cyclesPath(), "utf8"));
+    if (Array.isArray(rows)) cycles = rows.slice(0, 12);
+  } catch {
+    cycles = [];
+  }
+  status.cycles = cycles;
+}
+
+function recordCycle() {
+  const rec = {
+    n: status.cycle,
+    at: status.cycleStartedAt,
+    ended: new Date().toISOString(),
+    added: status.addedThisCycle,
+    skipped: status.skippedThisCycle,
+    failed: status.failedThisCycle,
+    page: status.searchPage,
+    pages: status.searchPages,
+    rateLimited: Boolean(status.rateLimitGaveUp || status.cycleReason === "rate-limit"),
+    reason: status.cycleReason || "done",
+  };
+  cycles.unshift(rec);
+  if (cycles.length > 12) cycles.length = 12;
+  status.cycles = cycles;
+  writeFile(cyclesPath(), JSON.stringify(cycles, null, 2)).catch(() => {});
+}
+
+async function waitWhilePaused() {
+  while (paused && !runNow && !shuttingDown) {
+    status.state = "paused";
+    status.paused = true;
+    status.sleepUntil = null;
+    status.message = "Paused — click Run now to start a cycle";
+    await persistStatus();
+    await sleep(400);
+  }
+}
+
+function wake() {
+  if (sleepResolve) {
+    clearTimeout(sleepTimer);
+    const r = sleepResolve;
+    sleepTimer = null;
+    sleepResolve = null;
+    r();
+  }
+}
+
+async function setPaused(value) {
+  paused = Boolean(value);
+  status.paused = paused;
+  if (paused) {
+    abortCycle = true;
+    runNow = false;
+    log("info", "Pause requested — finishing the current gallery");
+  }
+  await saveLive();
+  wake();
+}
+
+async function requestRun() {
+  paused = false;
+  status.paused = false;
+  runNow = true;
+  abortCycle = false;
+  log("info", "Run now — starting a cycle");
+  await saveLive();
+  wake();
+}
+
+function sanitizeTerms(input) {
+  if (!Array.isArray(input)) return null;
+  const out = [];
+  for (const raw of input) {
+    const t = String(raw || "").trim();
+    if (!t || t.length > 80) continue;
+    if (/[\n\r]/.test(t)) continue;
+    out.push(t);
+    if (out.length >= 40) break;
+  }
+  return out;
+}
+
+async function nhTagSearch(query, type) {
+  const q = String(query || "").trim().slice(0, 80);
+  if (q.length < 1) return [];
+  const body = { query: q, limit: 15 };
+  if (type && type !== "all") body.type = type;
+  const res = await fetch(`${API}/tags/search`, {
+    method: "POST",
+    headers: {
+      "User-Agent": UA,
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  if (res.status === 429) {
+    const err = new Error("Tag search rate limited");
+    err.code = "RATE_LIMIT";
+    throw err;
+  }
+  if (!res.ok) throw new Error(`Tag search ${res.status}`);
+  const rows = await res.json();
+  return (Array.isArray(rows) ? rows : []).map((t) => ({
+    id: t.id,
+    type: t.type,
+    name: t.name,
+    count: t.count,
+    slug: t.slug,
+  }));
+}
+
+function readJsonBody(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let n = 0;
+    req.on("data", (c) => {
+      n += c.length;
+      if (n > 20_000) {
+        reject(new Error("body too large"));
+        req.destroy();
+        return;
+      }
+      chunks.push(c);
+    });
+    req.on("end", () => {
+      const raw = Buffer.concat(chunks).toString("utf8");
+      if (!raw.trim()) {
+        resolve({});
+        return;
+      }
+      try {
+        resolve(JSON.parse(raw));
+      } catch {
+        reject(new Error("invalid json"));
+      }
+    });
+    req.on("error", reject);
+  });
+}
+
 function pushEvent(type, data) {
   status.recent.unshift({ type, at: new Date().toISOString(), ...data });
   if (status.recent.length > 40) status.recent.length = 40;
@@ -565,6 +795,9 @@ function pushEvent(type, data) {
 function snapshot() {
   return {
     ...status,
+    paused,
+    tagList: [...liveTags],
+    cycles,
     log: logBuffer.slice(-200),
     now: new Date().toISOString(),
     rateLimitHits,
@@ -594,13 +827,58 @@ function dashboardPage() {
 function startStatusServer(port) {
   const page = dashboardPage();
   const server = createServer((req, res) => {
-    const url = req.url || "/";
-    if (url.startsWith("/health")) {
-      json(res, 200, { ok: true, state: status.state });
+    const url = new URL(req.url || "/", "http://127.0.0.1");
+    const path = url.pathname;
+    if (path === "/health") {
+      json(res, 200, { ok: true, state: status.state, paused });
       return;
     }
-    if (url.startsWith("/api/status") || url.startsWith("/status.json")) {
+    if (path === "/api/status" || path === "/status.json") {
       json(res, 200, snapshot());
+      return;
+    }
+    if (path === "/api/tags" && req.method === "GET") {
+      const q = url.searchParams.get("q") || "";
+      const type = url.searchParams.get("type") || "all";
+      nhTagSearch(q, type)
+        .then((result) => json(res, 200, { result }))
+        .catch((err) =>
+          json(res, err?.code === "RATE_LIMIT" ? 429 : 502, {
+            error: err instanceof Error ? err.message : String(err),
+          }),
+        );
+      return;
+    }
+    if (path === "/api/control" && req.method === "POST") {
+      readJsonBody(req)
+        .then(async (body) => {
+          const action = String(body.action || "").toLowerCase();
+          if (action === "pause") await setPaused(true);
+          else if (action === "resume" || action === "run") await requestRun();
+          else {
+            json(res, 400, { error: "action must be pause or run" });
+            return;
+          }
+          json(res, 200, snapshot());
+        })
+        .catch((err) => json(res, 400, { error: err instanceof Error ? err.message : String(err) }));
+      return;
+    }
+    if (path === "/api/config" && req.method === "POST") {
+      readJsonBody(req)
+        .then(async (body) => {
+          const next = sanitizeTerms(body.tags);
+          if (!next) {
+            json(res, 400, { error: "tags must be an array of strings" });
+            return;
+          }
+          liveTags = next;
+          syncTagStatus();
+          await saveLive();
+          log("info", `Tags updated (${liveTags.length}): ${status.tags || "(none)"}`);
+          json(res, 200, snapshot());
+        })
+        .catch((err) => json(res, 400, { error: err instanceof Error ? err.message : String(err) }));
       return;
     }
     html(res, 200, page);

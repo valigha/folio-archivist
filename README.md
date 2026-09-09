@@ -22,7 +22,7 @@ GitHub Actions publishes `ghcr.io/valigha/folio-archivist:latest`.
 5. Set `NHENTAI_TAGS` and `SLEEP_INTERVAL` exactly like the old 9-FS container
 6. Apply. WebUI is port 8099.
 
-The status page is a live dashboard: countdown to the next run, search/download progress, recently written CBZs, and a filterable log (Expand / Copy, Info / Warn / Error).
+The status page is a live dashboard: countdown to the next run, search/download progress, recently written CBZs, a filterable log, **Pause / Run now**, and **tag chips** you can change without restarting. Tag search talks to nhentai `POST /api/v2/tags/search`. Saved chips live in `config/folio.json` (overrides `NHENTAI_TAGS` after the first save from the page).
 
 Make the GHCR package **public** the first time (GitHub → the repo → Packages) so Unraid can pull without a login.
 
