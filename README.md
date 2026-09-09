@@ -11,9 +11,21 @@ It talks to official API v2, writes Komga-ready CBZ files with `ComicInfo.xml`, 
 5. Sleep `SLEEP_INTERVAL` seconds
 6. Repeat forever
 
-## Unraid the normal way (pull an image)
+GitHub Actions publishes these tags (old ones are kept):
 
-GitHub Actions publishes `ghcr.io/valigha/folio-archivist:latest`.
+| Tag | What it is |
+| --- | --- |
+| `ghcr.io/valigha/folio-archivist:latest` | Newest build. This is what Force update pulls. |
+| `ghcr.io/valigha/folio-archivist:2.2.0` | Frozen copy of that version |
+| `ghcr.io/valigha/folio-archivist:v2.2.0` | Same image, `v` prefix |
+
+**Follow new features:** leave Repository as `:latest` and Force update when we ship.
+
+**Freeze a working build:** Edit the container → Repository → change `latest` to `2.2.0` → Apply. Library and appdata are untouched. Switch back to `:latest` later, or to an older number if a new one misbehaves.
+
+See [CHANGELOG.md](CHANGELOG.md) for what each number includes. Bump `VERSION` (and the worker `version` string) whenever we add features so a new frozen tag is created and `latest` moves.
+
+## Unraid the normal way (pull an image)
 
 1. Unraid → Docker → **Add Container**
 2. Repository: `ghcr.io/valigha/folio-archivist:latest`
