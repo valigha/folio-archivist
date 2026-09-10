@@ -42,7 +42,7 @@ const logBuffer = [];
 const MAX_LOG = 800;
 
 const status = {
-  version: "2.3.0",
+  version: "2.3.1",
   mode: cfg.NHENTAI_TAGS ? "server" : "client",
   state: "starting",
   cycle: 0,
@@ -83,6 +83,7 @@ const status = {
   incrementalPages: 10,
   lastFullAt: null,
   nextCycleFull: true,
+  delayMs: cfg.REQUEST_DELAY_MS || 2000,
 };
 
 let shuttingDown = false;
@@ -100,6 +101,10 @@ let incrementalPages = cfg.INCREMENTAL_PAGES ?? 10;
 let lastFullQuery = "";
 let lastFullAt = null;
 let forceFullNext = false;
+let requestDelayMs = Math.max(0, cfg.REQUEST_DELAY_MS || 2000);
+const DELAY_FLOOR = requestDelayMs;
+const DELAY_STEP_MS = 1000;
+const DELAY_MAX_MS = 15_000;
 
 process.on("SIGTERM", onSignal);
 process.on("SIGINT", onSignal);
@@ -116,7 +121,7 @@ if (cfg.STATUS_PORT) startStatusServer(cfg.STATUS_PORT);
 
 log(
   "info",
-  `Folio worker ${status.mode} mode. library=${cfg.LIBRARY_PATH} split=${cfg.LIBRARY_SPLIT} sleep=${cfg.SLEEP_INTERVAL}s delay=${cfg.REQUEST_DELAY_MS}ms tags=${status.tags || "(none)"}`,
+  `Folio worker ${status.mode} mode. library=${cfg.LIBRARY_PATH} split=${cfg.LIBRARY_SPLIT} sleep=${cfg.SLEEP_INTERVAL}s delay=${requestDelayMs}ms tags=${status.tags || "(none)"}`,
 );
 
 await main();
@@ -487,10 +492,22 @@ async function fetchCdn() {
 
 async function throttleApi() {
   const now = Date.now();
-  const waitUntil = Math.max(apiCooldownUntil, lastApiAt + (cfg.REQUEST_DELAY_MS || 0));
+  const waitUntil = Math.max(apiCooldownUntil, lastApiAt + (requestDelayMs || 0));
   const wait = waitUntil - now;
   if (wait > 0) await sleep(wait);
   lastApiAt = Date.now();
+}
+
+async function bumpDelay() {
+  const next = Math.min(DELAY_MAX_MS, requestDelayMs + DELAY_STEP_MS);
+  if (next <= requestDelayMs) {
+    log("warn", `API delay already at cap ${requestDelayMs}ms`);
+    return;
+  }
+  requestDelayMs = next;
+  status.delayMs = requestDelayMs;
+  log("warn", `Raised API delay to ${requestDelayMs}ms after 429 (was ${next - DELAY_STEP_MS}ms)`);
+  await saveLive();
 }
 
 async function api(path) {
@@ -521,11 +538,13 @@ async function api(path) {
         status.rateLimitGaveUp = true;
         status.state = "rate-limited";
         status.message = `Giving up this cycle after ${rateLimitHits} rate limits`;
+        await bumpDelay();
         const err = new Error(`Giving up this cycle after ${rateLimitHits} rate limits`);
         err.code = "RATE_LIMIT";
         throw err;
       }
       await sleep(wait);
+      await bumpDelay();
       continue;
     }
     if (res.status === 503 || res.status === 502) {
@@ -659,6 +678,7 @@ function syncTagStatus() {
   status.searchMode = plan.incremental ? "incremental" : "full";
   status.searchPageCap = plan.cap;
   status.nextCycleFull = !plan.incremental;
+  status.delayMs = requestDelayMs;
 }
 
 function loadLive() {
@@ -674,6 +694,9 @@ function loadLive() {
     if (typeof j.lastFullQuery === "string") lastFullQuery = j.lastFullQuery;
     if (typeof j.lastFullAt === "string") lastFullAt = j.lastFullAt;
     if (typeof j.forceFullNext === "boolean") forceFullNext = j.forceFullNext;
+    if (Number.isFinite(Number(j.requestDelayMs))) {
+      requestDelayMs = Math.max(DELAY_FLOOR, Math.min(DELAY_MAX_MS, Number(j.requestDelayMs)));
+    }
   } catch {
     // first run: seed from Unraid env
   }
@@ -694,6 +717,7 @@ async function saveLive() {
           lastFullQuery,
           lastFullAt,
           forceFullNext,
+          requestDelayMs,
         },
         null,
         2,
@@ -892,7 +916,7 @@ function snapshot() {
     catchUpStreak: cfg.CATCH_UP_STREAK,
     maxPerCycle: cfg.MAX_PER_CYCLE,
     sleepSeconds: cfg.SLEEP_INTERVAL,
-    delayMs: cfg.REQUEST_DELAY_MS,
+    delayMs: requestDelayMs,
   };
 }
 

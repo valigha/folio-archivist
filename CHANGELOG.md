@@ -9,6 +9,11 @@ Images stay on GHCR forever (until someone deletes the tag).
 | `ghcr.io/valigha/folio-archivist:2.2.0` | this release, frozen |
 | `ghcr.io/valigha/folio-archivist:v2.2.0` | same image, `v` prefix |
 
+## 2.3.1
+
+- After a 429, wait as before, then raise the API delay by 1 second (saved, cap 15s)
+- Status banner shows the new delay
+
 ## 2.3.0
 
 - Search page stays visible while a gallery is downloading

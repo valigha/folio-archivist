@@ -554,12 +554,13 @@
       if (data.rateLimitGaveUp || data.state === "rate-limited") {
         $("bannerTitle").textContent = "Rate limited — this cycle stopped";
         $("bannerBody").textContent = total + " hits this session on " + path
-          + ". Waiting for the next run instead of hammering the API.";
+          + ". Delay is now " + Math.round((data.delayMs || 0) / 1000) + "s between API calls. Waiting for the next run.";
       } else if (active) {
         const left = Math.max(0, until - Date.now());
         $("bannerTitle").textContent = "429 from nhentai — backing off";
         $("bannerBody").textContent = "Waiting " + hms(left) + " then retrying " + path
-          + " · " + hits + " in a row · " + total + " this session";
+          + " · delay will become " + Math.round(((data.delayMs || 0) + 1000) / 1000) + "s · "
+          + hits + " in a row";
       } else {
         $("bannerTitle").textContent = "Last 429 · " + ago(data.rateLimitAt) + " ago";
         $("bannerBody").textContent = path + " · " + total + " this session. Recovered — currently "
@@ -776,7 +777,8 @@
           : "Next cycle: all pages — no full pass recorded for these chips yet.";
       } else {
         $("incStatus").textContent = "Next cycle: newest " + (data.incrementalPages || 0)
-          + " pages only. Last full pass " + (data.lastFullAt ? ago(data.lastFullAt) + " ago" : "recorded") + ".";
+          + " pages only. Last full pass " + (data.lastFullAt ? ago(data.lastFullAt) + " ago" : "recorded")
+          + ". API delay " + Math.round((data.delayMs || 0) / 1000) + "s.";
       }
     }
     function paintCycles() {
