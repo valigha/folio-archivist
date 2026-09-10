@@ -16,8 +16,8 @@ GitHub Actions publishes these tags (old ones are kept):
 | Tag | What it is |
 | --- | --- |
 | `ghcr.io/valigha/folio-archivist:latest` | Newest build. This is what Force update pulls. |
-| `ghcr.io/valigha/folio-archivist:2.3.1` | Frozen copy of that version |
-| `ghcr.io/valigha/folio-archivist:v2.3.1` | Same image, `v` prefix |
+| `ghcr.io/valigha/folio-archivist:2.3.2` | Frozen copy of that version |
+| `ghcr.io/valigha/folio-archivist:v2.3.2` | Same image, `v` prefix |
 
 **Follow new features:** leave Repository as `:latest` and Force update when we ship.
 

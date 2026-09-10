@@ -9,6 +9,10 @@ Images stay on GHCR forever (until someone deletes the tag).
 | `ghcr.io/valigha/folio-archivist:2.2.0` | this release, frozen |
 | `ghcr.io/valigha/folio-archivist:v2.2.0` | same image, `v` prefix |
 
+## 2.3.2
+
+- **Stop — newest N only** aborts the current full walk (after the gallery in progress), marks these chips as scanned, and starts an N-page cycle. Saved in `folio.json` so a container restart stays newest-only.
+
 ## 2.3.1
 
 - After a 429, wait as before, then raise the API delay by 1 second (saved, cap 15s)

@@ -42,7 +42,7 @@ const logBuffer = [];
 const MAX_LOG = 800;
 
 const status = {
-  version: "2.3.1",
+  version: "2.3.2",
   mode: cfg.NHENTAI_TAGS ? "server" : "client",
   state: "starting",
   cycle: 0,
@@ -169,6 +169,10 @@ async function main() {
     recordCycle();
     if (cfg.RUN_ONCE || shuttingDown) break;
     if (paused) continue;
+    if (runNow) {
+      log("info", "Skipping sleep — starting the next cycle now");
+      continue;
+    }
     const seconds = cfg.SLEEP_INTERVAL || 3600;
     const until = new Date(Date.now() + seconds * 1000);
     status.state = "sleeping";
@@ -333,6 +337,12 @@ async function searchAndDownload(have, skip, cdn) {
         if (ok) added += 1;
         status.state = "searching";
         status.message = searchProgressMessage();
+        if (paused || abortCycle) {
+          status.cycleReason = paused ? "paused" : "aborted";
+          log("info", paused ? "Paused after current gallery" : "Stopped full search after current gallery");
+          await writeDownloadme(collected);
+          return;
+        }
       } catch (err) {
         if (err?.code === "RATE_LIMIT") {
           log("warn", "Rate limited while downloading — stopping this cycle.");
@@ -823,6 +833,20 @@ async function requestRun() {
   wake();
 }
 
+async function requestNewestOnly() {
+  lastFullQuery = applySafety(liveTags.join(" "), cfg.SAFETY_FILTER);
+  lastFullAt = new Date().toISOString();
+  forceFullNext = false;
+  paused = false;
+  status.paused = false;
+  abortCycle = true;
+  runNow = true;
+  status.lastFullAt = lastFullAt;
+  log("info", `Stop full search — next cycle newest ${incrementalPages} pages only`);
+  await saveLive();
+  wake();
+}
+
 function sanitizeTerms(input) {
   if (!Array.isArray(input)) return null;
   const out = [];
@@ -971,13 +995,8 @@ function startStatusServer(port) {
             forceFullNext = true;
             await saveLive();
             log("info", "Next cycle will search all pages");
-          } else if (action === "newest") {
-            lastFullQuery = applySafety(liveTags.join(" "), cfg.SAFETY_FILTER);
-            lastFullAt = new Date().toISOString();
-            forceFullNext = false;
-            await saveLive();
-            log("info", "Marked current chips as scanned — next cycles newest-only");
-          } else {
+          } else if (action === "newest") await requestNewestOnly();
+          else {
             json(res, 400, { error: "action must be pause, run, full, or newest" });
             return;
           }
