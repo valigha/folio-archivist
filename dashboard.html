@@ -265,7 +265,39 @@
     }
     .controls button:disabled { opacity: 0.45; cursor: default; }
     .controls .hint { color: var(--muted); font-size: 13px; }
+    .search-line {
+      font-variant-numeric: tabular-nums;
+      color: var(--accent);
+      font-size: 15px;
+      margin: 0 0 8px;
+      letter-spacing: -0.01em;
+    }
     .query-card { margin-bottom: 14px; }
+    .search-line.muted { color: var(--muted); }
+    .inc-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      margin-top: 14px;
+    }
+    .inc-row input[type="number"] {
+      width: 72px;
+      background: var(--surface-2);
+      color: var(--fg);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 8px 10px;
+      font: inherit;
+    }
+    .inc-row button {
+      background: var(--surface);
+      color: var(--fg);
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 8px 12px;
+      font-size: 12px;
+    }
     .chips { display: flex; flex-wrap: wrap; gap: 8px; min-height: 36px; }
     .chip {
       display: inline-flex;
@@ -385,6 +417,7 @@
     <div class="controls">
       <button type="button" id="btnPause">Pause</button>
       <button type="button" class="primary" id="btnRun">Run now</button>
+      <button type="button" id="btnFull">Search all pages next</button>
       <span class="hint" id="controlHint">Changes apply on the next cycle.</span>
     </div>
 
@@ -415,12 +448,20 @@
       </div>
       <ul class="suggest" id="suggest"></ul>
       <p class="now-meta" id="effective"></p>
+      <div class="inc-row">
+        <span class="now-meta">After a full pass, only search the first</span>
+        <input id="incPages" type="number" min="0" max="500" step="1" value="10" aria-label="Incremental pages"/>
+        <span class="now-meta">newest pages (0 = always all)</span>
+        <button type="button" id="btnNewest">Use newest-only from now</button>
+      </div>
+      <p class="now-meta" id="incStatus"></p>
     </section>
 
     <div class="grid">
       <section class="card">
         <h2>Now</h2>
         <p class="now-title" id="nowTitle">Starting…</p>
+        <p class="search-line muted" id="searchLine">Search page —</p>
         <p class="now-meta" id="nowMeta"></p>
         <div class="bar" id="bar"><i id="barFill"></i></div>
         <p class="pct" id="pct"></p>
@@ -548,6 +589,24 @@
       paintBanner();
     }
 
+    function paintSearchLine() {
+      const el = $("searchLine");
+      const page = data.searchPage || 0;
+      const pages = data.searchPages || 0;
+      const mode = data.searchMode === "incremental"
+        ? ("newest " + (data.searchPageCap || data.incrementalPages || 0))
+        : "full pass";
+      if (!pages && !page) {
+        el.textContent = data.nextCycleFull
+          ? "Next search: all pages"
+          : ("Next search: newest " + (data.incrementalPages || 0) + " pages");
+        el.className = "search-line muted";
+        return;
+      }
+      el.textContent = "Search page " + page + " / " + pages + " · " + mode;
+      el.className = "search-line";
+    }
+
     function paintNow() {
       const title = $("nowTitle");
       const meta = $("nowMeta");
@@ -555,6 +614,7 @@
       const fill = $("barFill");
       const pct = $("pct");
       const st = data.state;
+      paintSearchLine();
       if (st === "paused" || data.paused && st !== "downloading") {
         title.textContent = "Paused";
         meta.textContent = "Current gallery will finish. Click Run now when you want the next cycle.";
@@ -573,7 +633,9 @@
       }
       if (st === "sleeping") {
         title.textContent = "Sleeping until next search";
-        meta.textContent = data.message || "Waiting for SLEEP_INTERVAL.";
+        meta.textContent = data.nextCycleFull
+          ? "Next cycle will walk all pages (chips changed or full pass requested)."
+          : ("Next cycle only searches the newest " + (data.incrementalPages || 0) + " pages.");
         fill.style.width = "100%";
         bar.className = "bar";
         pct.textContent = data.sleepUntil ? ("Wakes " + data.sleepUntil.replace("T", " ").slice(0, 19) + " UTC") : "";
@@ -584,7 +646,7 @@
         const done = data.downloadDone || 0;
         const total = data.downloadTotal || 0;
         meta.textContent = total
-          ? ("Downloading #" + data.currentId + " · page " + done + " / " + total)
+          ? ("Downloading #" + data.currentId + " · image " + done + " / " + total)
           : ("Fetching #" + data.currentId);
         const p = total ? Math.round((done / total) * 100) : 8;
         fill.style.width = p + "%";
@@ -597,13 +659,17 @@
         const pages = data.searchPages || 0;
         title.textContent = pages ? ("Search page " + page + " / " + pages) : "Searching";
         meta.textContent = (data.searchTotal ? (data.searchTotal.toLocaleString() + " galleries · ") : "")
+          + (data.searchMode === "incremental" ? "newest-only · " : "full pass · ")
           + "streak " + (data.streak || 0)
           + (data.catchUpStreak ? (" / " + data.catchUpStreak) : "")
           + " already handled";
-        const p = pages ? Math.round((page / pages) * 100) : 0;
+        const denom = data.searchPageCap || pages;
+        const p = denom ? Math.round((page / denom) * 100) : 0;
         fill.style.width = Math.max(2, p) + "%";
         bar.className = "bar warn";
-        pct.textContent = pages ? (p + "% of this cycle's search") : data.message || "";
+        pct.textContent = data.searchMode === "incremental"
+          ? ("Newest-only cap " + (data.searchPageCap || 0) + " pages")
+          : (pages ? (p + "% of this cycle's search") : data.message || "");
         return;
       }
       title.textContent = data.message || st;
@@ -697,6 +763,21 @@
       $("effective").textContent = data.tags
         ? ("Effective search: " + data.tags)
         : "Safety filter still appends illegal-tag excludes when enabled.";
+      paintInc();
+    }
+    function paintInc() {
+      const input = $("incPages");
+      if (document.activeElement !== input) {
+        input.value = String(data.incrementalPages ?? 10);
+      }
+      if (data.nextCycleFull) {
+        $("incStatus").textContent = data.lastFullAt
+          ? "Next cycle: all pages (chips changed or full search requested)."
+          : "Next cycle: all pages — no full pass recorded for these chips yet.";
+      } else {
+        $("incStatus").textContent = "Next cycle: newest " + (data.incrementalPages || 0)
+          + " pages only. Last full pass " + (data.lastFullAt ? ago(data.lastFullAt) + " ago" : "recorded") + ".";
+      }
     }
     function paintCycles() {
       const rows = data.cycles || [];
@@ -825,6 +906,30 @@
       postJSON("/api/control", { action: "run" }).catch((e) => {
         $("controlHint").textContent = e.message;
       });
+    });
+    $("btnFull").addEventListener("click", () => {
+      $("controlHint").textContent = "Next cycle will search all pages.";
+      postJSON("/api/control", { action: "full" }).catch((e) => {
+        $("controlHint").textContent = e.message;
+      });
+    });
+    $("btnNewest").addEventListener("click", () => {
+      $("controlHint").textContent = "Marked scanned — next cycles newest-only.";
+      postJSON("/api/control", { action: "newest" }).catch((e) => {
+        $("controlHint").textContent = e.message;
+      });
+    });
+    let incTimer = 0;
+    $("incPages").addEventListener("change", () => {
+      clearTimeout(incTimer);
+      const n = Number($("incPages").value);
+      postJSON("/api/config", { incrementalPages: n }).then(() => {
+        $("controlHint").textContent = "Newest-page cap saved.";
+      }).catch((e) => { $("controlHint").textContent = e.message; });
+    });
+    $("incPages").addEventListener("input", () => {
+      clearTimeout(incTimer);
+      incTimer = setTimeout(() => $("incPages").dispatchEvent(new Event("change")), 600);
     });
     $("tagQ").addEventListener("input", () => {
       clearTimeout(suggestTimer);

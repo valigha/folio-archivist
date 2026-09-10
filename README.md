@@ -16,8 +16,8 @@ GitHub Actions publishes these tags (old ones are kept):
 | Tag | What it is |
 | --- | --- |
 | `ghcr.io/valigha/folio-archivist:latest` | Newest build. This is what Force update pulls. |
-| `ghcr.io/valigha/folio-archivist:2.2.0` | Frozen copy of that version |
-| `ghcr.io/valigha/folio-archivist:v2.2.0` | Same image, `v` prefix |
+| `ghcr.io/valigha/folio-archivist:2.3.0` | Frozen copy of that version |
+| `ghcr.io/valigha/folio-archivist:v2.3.0` | Same image, `v` prefix |
 
 **Follow new features:** leave Repository as `:latest` and Force update when we ship.
 
@@ -54,7 +54,8 @@ Make the GHCR package **public** the first time (GitHub → the repo → Package
 | `CATCH_UP_STREAK` | `50` | Newest-first: stop the cycle after this many already-have galleries in a row. `0` = full sweep like the original. |
 | `MAX_PER_CYCLE` | `0` | Cap new downloads per cycle (`0` = unlimited) |
 | `REQUEST_DELAY_MS` | `2000` | Pause between API search/metadata calls. Raise to `3000`–`5000` if you still see 429s |
-| `MAX_SEARCH_PAGES` | `0` | Cap search pages per cycle (`0` = unlimited). Useful with huge queries like all of English |
+| `MAX_SEARCH_PAGES` | `0` | Hard cap on search pages per cycle (`0` = unlimited). |
+| `INCREMENTAL_PAGES` | `10` | After a full pass with the same chips, later cycles only search this many newest pages. `0` = always walk everything. Changing chips forces a full pass again. |
 | `CIRCUMVENT_LOAD_BALANCER` | `true` | Hit `i1`–`i4.nhentai.net` directly |
 | `API_KEY` | empty | Optional. Sent as `Authorization: Key …` |
 | `USER_AGENT` | Folio/1.0 … | API v2 wants a descriptive UA |

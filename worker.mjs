@@ -29,6 +29,7 @@ import {
   parseIdList,
   pickTitle,
   sanitizeFilename,
+  searchPageCap,
 } from "./lib.mjs";
 
 const API = "https://nhentai.net/api/v2";
@@ -41,7 +42,7 @@ const logBuffer = [];
 const MAX_LOG = 800;
 
 const status = {
-  version: "2.2.0",
+  version: "2.3.0",
   mode: cfg.NHENTAI_TAGS ? "server" : "client",
   state: "starting",
   cycle: 0,
@@ -77,6 +78,11 @@ const status = {
   cycleReason: "",
   tagList: [],
   cycles: [],
+  searchMode: "full",
+  searchPageCap: 0,
+  incrementalPages: 10,
+  lastFullAt: null,
+  nextCycleFull: true,
 };
 
 let shuttingDown = false;
@@ -90,6 +96,10 @@ let paused = false;
 let runNow = false;
 let abortCycle = false;
 let cycles = [];
+let incrementalPages = cfg.INCREMENTAL_PAGES ?? 10;
+let lastFullQuery = "";
+let lastFullAt = null;
+let forceFullNext = false;
 
 process.on("SIGTERM", onSignal);
 process.on("SIGINT", onSignal);
@@ -136,8 +146,6 @@ async function main() {
     status.addedThisCycle = 0;
     status.skippedThisCycle = 0;
     status.failedThisCycle = 0;
-    status.searchPage = 0;
-    status.searchPages = 0;
     status.streak = 0;
     status.cycleReason = "";
     status.cycleStartedAt = new Date().toISOString();
@@ -204,9 +212,25 @@ async function runCycle() {
 async function searchAndDownload(have, skip, cdn) {
   if (!liveTags.length) return;
   const query = applySafety(liveTags.join(" "), cfg.SAFETY_FILTER);
+  const plan = searchPageCap({
+    query,
+    lastFullQuery,
+    incrementalPages,
+    forceFull: forceFullNext,
+    maxSearchPages: cfg.MAX_SEARCH_PAGES,
+  });
+  status.searchMode = plan.incremental ? "incremental" : "full";
+  status.searchPageCap = plan.cap;
   status.state = "searching";
-  status.message = `Searching: ${query}`;
-  log("info", `Searching “${query}” sort=${cfg.SEARCH_SORT}`);
+  status.message = plan.incremental
+    ? `Searching newest ${plan.cap} pages: ${query}`
+    : `Searching (full): ${query}`;
+  log(
+    "info",
+    plan.incremental
+      ? `Incremental search — first ${plan.cap} pages of “${query}”`
+      : `Full search “${query}” sort=${cfg.SEARCH_SORT}${plan.cap ? ` cap=${plan.cap}` : ""}`,
+  );
 
   let page = 1;
   let pages = 1;
@@ -221,9 +245,13 @@ async function searchAndDownload(have, skip, cdn) {
       await writeDownloadme(collected);
       return;
     }
-    if (cfg.MAX_SEARCH_PAGES > 0 && page > cfg.MAX_SEARCH_PAGES) {
-      log("info", `MAX_SEARCH_PAGES=${cfg.MAX_SEARCH_PAGES} reached`);
+    if (plan.cap > 0 && page > plan.cap) {
+      status.cycleReason = plan.incremental ? "incremental" : "max";
+      log("info", plan.incremental
+        ? `Incremental cap of ${plan.cap} pages reached`
+        : `MAX_SEARCH_PAGES=${plan.cap} reached`);
       await writeDownloadme(collected);
+      maybeMarkFull(query, plan.incremental);
       return;
     }
     let data;
@@ -253,7 +281,7 @@ async function searchAndDownload(have, skip, cdn) {
     status.searchPages = pages;
     status.searchTotal = Number(data.total) || status.searchTotal;
     status.state = "searching";
-    status.message = `Search page ${page}/${pages}`;
+    status.message = searchProgressMessage();
     if (page === 1) {
       log("info", `Search: ${data.total ?? rows.length} galleries across ${pages} pages`);
     }
@@ -281,6 +309,7 @@ async function searchAndDownload(have, skip, cdn) {
           status.cycleReason = "caught-up";
           pushEvent("caught-up", { title: `Caught up after ${streak} already in library` });
           await writeDownloadme(collected);
+          await maybeMarkFull(query, plan.incremental);
           return;
         }
         continue;
@@ -289,7 +318,7 @@ async function searchAndDownload(have, skip, cdn) {
       status.streak = 0;
       if (cfg.MAX_PER_CYCLE > 0 && added >= cfg.MAX_PER_CYCLE) {
         log("info", `MAX_PER_CYCLE=${cfg.MAX_PER_CYCLE} reached`);
-        status.cycleReason = "max";
+        status.cycleReason = "cap-downloads";
         await writeDownloadme(collected);
         return;
       }
@@ -298,7 +327,7 @@ async function searchAndDownload(have, skip, cdn) {
         const ok = await downloadGallery(id, cdn, have);
         if (ok) added += 1;
         status.state = "searching";
-        status.message = `Search page ${page}/${pages}`;
+        status.message = searchProgressMessage();
       } catch (err) {
         if (err?.code === "RATE_LIMIT") {
           log("warn", "Rate limited while downloading — stopping this cycle.");
@@ -316,6 +345,7 @@ async function searchAndDownload(have, skip, cdn) {
   }
   await writeDownloadme(collected);
   if (!status.cycleReason) status.cycleReason = "complete";
+  await maybeMarkFull(query, plan.incremental);
 }
 
 async function processIds(ids, have, skip, cdn) {
@@ -617,6 +647,18 @@ function syncTagStatus() {
   status.tags = liveTags.length ? applySafety(liveTags.join(" "), cfg.SAFETY_FILTER) : "";
   status.mode = liveTags.length ? "server" : "client";
   status.paused = paused;
+  status.incrementalPages = incrementalPages;
+  status.lastFullAt = lastFullAt;
+  const plan = searchPageCap({
+    query: status.tags,
+    lastFullQuery,
+    incrementalPages,
+    forceFull: forceFullNext,
+    maxSearchPages: cfg.MAX_SEARCH_PAGES,
+  });
+  status.searchMode = plan.incremental ? "incremental" : "full";
+  status.searchPageCap = plan.cap;
+  status.nextCycleFull = !plan.incremental;
 }
 
 function loadLive() {
@@ -626,6 +668,12 @@ function loadLive() {
       liveTags = j.tags.map((s) => String(s).trim()).filter(Boolean);
     }
     if (typeof j.paused === "boolean") paused = j.paused;
+    if (Number.isFinite(Number(j.incrementalPages))) {
+      incrementalPages = Math.max(0, Math.min(500, Number(j.incrementalPages)));
+    }
+    if (typeof j.lastFullQuery === "string") lastFullQuery = j.lastFullQuery;
+    if (typeof j.lastFullAt === "string") lastFullAt = j.lastFullAt;
+    if (typeof j.forceFullNext === "boolean") forceFullNext = j.forceFullNext;
   } catch {
     // first run: seed from Unraid env
   }
@@ -636,11 +684,47 @@ async function saveLive() {
   try {
     const path = liveConfigPath();
     await mkdir(dirname(path), { recursive: true });
-    await writeFile(path, JSON.stringify({ tags: liveTags, paused }, null, 2) + "\n");
+    await writeFile(
+      path,
+      JSON.stringify(
+        {
+          tags: liveTags,
+          paused,
+          incrementalPages,
+          lastFullQuery,
+          lastFullAt,
+          forceFullNext,
+        },
+        null,
+        2,
+      ) + "\n",
+    );
   } catch (err) {
     log("warn", `Could not save folio.json: ${err instanceof Error ? err.message : err}`);
   }
   syncTagStatus();
+}
+
+function searchProgressMessage() {
+  const page = status.searchPage || 0;
+  const pages = status.searchPages || 0;
+  const mode = status.searchMode === "incremental"
+    ? `newest ${status.searchPageCap || incrementalPages}`
+    : "full";
+  if (!pages) return status.message;
+  return `Search page ${page} / ${pages} (${mode})`;
+}
+
+async function maybeMarkFull(query, wasIncremental) {
+  if (wasIncremental) return;
+  if (paused || abortCycle || status.rateLimitGaveUp) return;
+  if (!["complete", "caught-up", "max"].includes(status.cycleReason)) return;
+  lastFullQuery = query;
+  lastFullAt = new Date().toISOString();
+  forceFullNext = false;
+  status.lastFullAt = lastFullAt;
+  log("info", "Full pass recorded — later cycles only search the newest pages unless chips change");
+  await saveLive();
 }
 
 function loadCycles() {
@@ -801,6 +885,10 @@ function snapshot() {
     log: logBuffer.slice(-200),
     now: new Date().toISOString(),
     rateLimitHits,
+    incrementalPages,
+    lastFullQuery,
+    lastFullAt,
+    forceFullNext,
     catchUpStreak: cfg.CATCH_UP_STREAK,
     maxPerCycle: cfg.MAX_PER_CYCLE,
     sleepSeconds: cfg.SLEEP_INTERVAL,
@@ -855,8 +943,18 @@ function startStatusServer(port) {
           const action = String(body.action || "").toLowerCase();
           if (action === "pause") await setPaused(true);
           else if (action === "resume" || action === "run") await requestRun();
-          else {
-            json(res, 400, { error: "action must be pause or run" });
+          else if (action === "full") {
+            forceFullNext = true;
+            await saveLive();
+            log("info", "Next cycle will search all pages");
+          } else if (action === "newest") {
+            lastFullQuery = applySafety(liveTags.join(" "), cfg.SAFETY_FILTER);
+            lastFullAt = new Date().toISOString();
+            forceFullNext = false;
+            await saveLive();
+            log("info", "Marked current chips as scanned — next cycles newest-only");
+          } else {
+            json(res, 400, { error: "action must be pause, run, full, or newest" });
             return;
           }
           json(res, 200, snapshot());
@@ -867,15 +965,25 @@ function startStatusServer(port) {
     if (path === "/api/config" && req.method === "POST") {
       readJsonBody(req)
         .then(async (body) => {
-          const next = sanitizeTerms(body.tags);
-          if (!next) {
-            json(res, 400, { error: "tags must be an array of strings" });
-            return;
+          if (body.tags != null) {
+            const next = sanitizeTerms(body.tags);
+            if (!next) {
+              json(res, 400, { error: "tags must be an array of strings" });
+              return;
+            }
+            liveTags = next;
           }
-          liveTags = next;
+          if (body.incrementalPages != null) {
+            const n = Number(body.incrementalPages);
+            if (!Number.isFinite(n)) {
+              json(res, 400, { error: "incrementalPages must be a number" });
+              return;
+            }
+            incrementalPages = Math.max(0, Math.min(500, Math.floor(n)));
+          }
           syncTagStatus();
           await saveLive();
-          log("info", `Tags updated (${liveTags.length}): ${status.tags || "(none)"}`);
+          log("info", `Config saved. tags=${liveTags.length} incremental=${incrementalPages} next=${status.nextCycleFull ? "full" : "newest"}`);
           json(res, 200, snapshot());
         })
         .catch((err) => json(res, 400, { error: err instanceof Error ? err.message : String(err) }));

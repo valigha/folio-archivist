@@ -9,6 +9,13 @@ Images stay on GHCR forever (until someone deletes the tag).
 | `ghcr.io/valigha/folio-archivist:2.2.0` | this release, frozen |
 | `ghcr.io/valigha/folio-archivist:v2.2.0` | same image, `v` prefix |
 
+## 2.3.0
+
+- Search page stays visible while a gallery is downloading
+- After a full pass with the same chips, later cycles only search the newest N pages (`INCREMENTAL_PAGES`, default 10)
+- Changing chips (or **Search all pages next**) walks everything again
+- **Use newest-only from now** marks the current query scanned without waiting for 4K pages
+
 ## 2.2.0
 
 - Pause / Run now on the status page

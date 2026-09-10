@@ -9,6 +9,7 @@ import {
   parseTags,
   sanitizeFilename,
   galleryIsUnsafe,
+  searchPageCap,
 } from "./lib.mjs";
 
 test("parseTags handles original docker array syntax", () => {
@@ -77,4 +78,29 @@ test("loadConfigFrom server mode", () => {
 test("galleryIsUnsafe", () => {
   assert.equal(galleryIsUnsafe({ tags: [{ name: "lolicon", type: "tag" }] }), true);
   assert.equal(galleryIsUnsafe({ tags: [{ name: "big breasts", type: "tag" }] }), false);
+});
+
+test("searchPageCap uses incremental pages only after a matching full pass", () => {
+  const query = 'language:"english"';
+  assert.deepEqual(
+    searchPageCap({ query, lastFullQuery: "", incrementalPages: 10, forceFull: false, maxSearchPages: 0 }),
+    { incremental: false, cap: 0 },
+  );
+  assert.deepEqual(
+    searchPageCap({ query, lastFullQuery: query, incrementalPages: 10, forceFull: false, maxSearchPages: 0 }),
+    { incremental: true, cap: 10 },
+  );
+  assert.deepEqual(
+    searchPageCap({ query, lastFullQuery: query, incrementalPages: 10, forceFull: true, maxSearchPages: 0 }),
+    { incremental: false, cap: 0 },
+  );
+  assert.deepEqual(
+    searchPageCap({ query, lastFullQuery: "other", incrementalPages: 10, forceFull: false, maxSearchPages: 0 }),
+    { incremental: false, cap: 0 },
+  );
+  assert.deepEqual(
+    searchPageCap({ query, lastFullQuery: query, incrementalPages: 10, forceFull: false, maxSearchPages: 3 }),
+    { incremental: true, cap: 3 },
+  );
+  assert.equal(loadConfigFrom({}).INCREMENTAL_PAGES, 10);
 });

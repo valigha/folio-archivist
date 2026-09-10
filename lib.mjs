@@ -73,6 +73,16 @@ export function applySafety(query, enabled) {
   return [q, ...extras].filter(Boolean).join(" ").trim();
 }
 
+/** How many search pages this cycle should walk. cap 0 = no extra cap. */
+export function searchPageCap({ query, lastFullQuery, incrementalPages, forceFull, maxSearchPages }) {
+  const same = Boolean(query) && query === lastFullQuery;
+  const incremental = !forceFull && incrementalPages > 0 && same;
+  let cap = 0;
+  if (incremental) cap = incrementalPages;
+  if (maxSearchPages > 0) cap = cap > 0 ? Math.min(cap, maxSearchPages) : maxSearchPages;
+  return { incremental, cap };
+}
+
 export function parseIdList(text) {
   if (!text) return [];
   return String(text)
@@ -207,6 +217,7 @@ export function loadConfigFrom(env) {
     STATUS_PORT: Math.max(0, num(env.STATUS_PORT, 8099)),
     REQUEST_DELAY_MS: Math.max(0, num(env.REQUEST_DELAY_MS, 2000)),
     MAX_SEARCH_PAGES: Math.max(0, num(env.MAX_SEARCH_PAGES, 0)),
+    INCREMENTAL_PAGES: Math.max(0, num(env.INCREMENTAL_PAGES, 10)),
     TZ: env.TZ || "",
   };
 }
