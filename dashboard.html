@@ -857,24 +857,30 @@
 
     function paint() {
       if (!data) return;
-      $("badge").textContent = data.state || "unknown";
-      $("badge").className = "badge " + (data.state || "");
-      $("tags").textContent = (data.tagList && data.tagList.length)
-        ? (data.tagList.length + " chip" + (data.tagList.length === 1 ? "" : "s"))
-        : "No query yet";
-      $("sLibrary").textContent = (data.libraryCount || 0).toLocaleString();
-      $("sAdded").textContent = String(data.addedThisCycle ?? data.downloaded ?? 0);
-      $("sSkipped").textContent = String(data.skippedThisCycle ?? data.skipped ?? 0);
-      $("sFailed").textContent = String(data.failedThisCycle ?? data.failed ?? 0);
-      $("sCycle").textContent = String(data.cycle || 0);
-      paintNow();
-      paintRecent();
-      paintLog();
-      paintChips();
-      paintCycles();
-      paintWant();
-      paintControls();
-      tick();
+      try {
+        $("badge").textContent = data.state || "unknown";
+        $("badge").className = "badge " + (data.state || "");
+        $("tags").textContent = (data.tagList && data.tagList.length)
+          ? (data.tagList.length + " chip" + (data.tagList.length === 1 ? "" : "s"))
+          : "No query yet";
+        $("sLibrary").textContent = (data.libraryCount || 0).toLocaleString();
+        $("sAdded").textContent = String(data.addedThisCycle ?? data.downloaded ?? 0);
+        $("sSkipped").textContent = String(data.skippedThisCycle ?? data.skipped ?? 0);
+        $("sFailed").textContent = String(data.failedThisCycle ?? data.failed ?? 0);
+        $("sCycle").textContent = String(data.cycle || 0);
+        paintNow();
+        paintRecent();
+        paintLog();
+        paintChips();
+        paintCycles();
+        paintWant();
+        paintControls();
+        tick();
+      } catch (err) {
+        console.error(err);
+        $("badge").textContent = "ui-error";
+        $("badge").className = "badge error";
+      }
     }
 
     function paintWant() {
@@ -990,6 +996,7 @@
         $("controlHint").textContent = e.message;
       }
     }
+    $("tagQ").addEventListener("input", () => {
       clearTimeout(suggestTimer);
       suggestTimer = setTimeout(searchTags, 350);
     });

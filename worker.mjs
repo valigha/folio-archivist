@@ -43,7 +43,7 @@ const logBuffer = [];
 const MAX_LOG = 800;
 
 const status = {
-  version: "2.4.0",
+  version: "2.4.1",
   mode: cfg.NHENTAI_TAGS ? "server" : "client",
   state: "starting",
   cycle: 0,
@@ -721,8 +721,10 @@ function syncTagStatus() {
 function loadLive() {
   try {
     const j = JSON.parse(readFileSync(liveConfigPath(), "utf8"));
-    if (Array.isArray(j.tags)) {
+    if (Array.isArray(j.tags) && j.tags.length) {
       liveTags = j.tags.map((s) => String(s).trim()).filter(Boolean);
+    } else if (cfg.NHENTAI_TAGS?.length && (!Array.isArray(j.tags) || !j.tags.length)) {
+      liveTags = [...cfg.NHENTAI_TAGS];
     }
     if (typeof j.paused === "boolean") paused = j.paused;
     if (Number.isFinite(Number(j.incrementalPages))) {
