@@ -6,6 +6,7 @@ import {
   libraryDir,
   loadConfigFrom,
   parseIdList,
+  parseGalleryRefs,
   parseTags,
   sanitizeFilename,
   galleryIsUnsafe,
@@ -57,6 +58,17 @@ test("idFromFilename and sanitizeFilename", () => {
 
 test("parseIdList", () => {
   assert.deepEqual(parseIdList("1\n2 3,4"), [1, 2, 3, 4]);
+});
+
+test("parseGalleryRefs accepts nhentai links and raw IDs", () => {
+  assert.deepEqual(parseGalleryRefs("https://nhentai.net/g/123456/"), [123456]);
+  assert.deepEqual(parseGalleryRefs("https://www.nhentai.net/g/42"), [42]);
+  assert.deepEqual(
+    parseGalleryRefs("https://nhentai.net/g/1/\nhttps://nhentai.net/g/2/\n2"),
+    [1, 2],
+  );
+  assert.deepEqual(parseGalleryRefs("603864"), [603864]);
+  assert.deepEqual(parseGalleryRefs("not a link"), []);
 });
 
 test("loadConfigFrom server mode", () => {

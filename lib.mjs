@@ -91,6 +91,24 @@ export function parseIdList(text) {
     .filter((n) => Number.isInteger(n) && n > 0);
 }
 
+/** IDs from nhentai URLs, /g/123456, or raw numbers. Deduped, order kept. */
+export function parseGalleryRefs(text) {
+  const seen = new Set();
+  const ids = [];
+  const add = (n) => {
+    const id = Number(n);
+    if (!Number.isInteger(id) || id <= 0 || seen.has(id)) return;
+    seen.add(id);
+    ids.push(id);
+  };
+  const raw = String(text || "");
+  for (const m of raw.matchAll(/(?:https?:\/\/)?(?:www\.)?nhentai\.net\/g\/(\d+)/gi)) add(m[1]);
+  for (const m of raw.matchAll(/(?:^|[\s,;])\/g\/(\d+)/g)) add(m[1]);
+  const stripped = raw.replace(/https?:\/\/[^\s]+/gi, " ");
+  for (const id of parseIdList(stripped)) add(id);
+  return ids;
+}
+
 export function idFromFilename(name) {
   const m = String(name).match(/^(\d+)\b/);
   return m ? Number(m[1]) : null;

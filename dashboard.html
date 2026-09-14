@@ -327,6 +327,7 @@
       line-height: 1;
     }
     .search-row { display: flex; gap: 8px; margin-top: 14px; }
+    .search-row input { flex: 1; }
     .search-row select, .search-row input {
       background: var(--surface-2);
       color: var(--fg);
@@ -455,6 +456,17 @@
         <span class="now-meta">newest pages (0 = always all)</span>
       </div>
       <p class="now-meta" id="incStatus"></p>
+    </section>
+
+    <section class="card query-card">
+      <h2>Add a book</h2>
+      <p class="now-meta">Paste an nhentai link (or ID). That gallery is downloaded as-is — chips and the scheduled search are not changed. The safety filter still skips illegal tags.</p>
+      <div class="search-row">
+        <input id="wantUrl" type="text" autocomplete="off" placeholder="https://nhentai.net/g/123456/"/>
+        <button type="button" class="primary" id="btnWant">Add</button>
+      </div>
+      <ul class="list" id="wantList"></ul>
+      <p class="empty" id="wantEmpty">Nothing queued.</p>
     </section>
 
     <div class="grid">
@@ -860,8 +872,31 @@
       paintLog();
       paintChips();
       paintCycles();
+      paintWant();
       paintControls();
       tick();
+    }
+
+    function paintWant() {
+      const queued = data.wantQueue || [];
+      const recent = data.wantRecent || [];
+      const ul = $("wantList");
+      const empty = $("wantEmpty");
+      const rows = [];
+      for (const id of queued) {
+        rows.push("<li><span class=\"id\">#" + esc(id) + "</span><span class=\"name\">Queued — chips ignored</span></li>");
+      }
+      for (const e of recent.slice(0, 6)) {
+        const label = e.result === "wrote" ? (e.title || "Saved")
+          : e.result === "have" ? "Already in library"
+          : e.result === "blacklisted" ? "On the blacklist"
+          : e.result === "skipped" ? "Skipped (safety filter)"
+          : e.result === "failed" ? (e.title || "Failed")
+          : esc(e.result || "");
+        rows.push("<li><span class=\"id\">#" + esc(e.id) + "</span><span class=\"name\">" + esc(label) + "</span><span class=\"when\">" + esc(ago(e.at)) + "</span></li>");
+      }
+      ul.innerHTML = rows.join("");
+      empty.classList.toggle("hidden", rows.length > 0);
     }
 
     async function poll() {
@@ -933,7 +968,28 @@
       clearTimeout(incTimer);
       incTimer = setTimeout(() => $("incPages").dispatchEvent(new Event("change")), 600);
     });
-    $("tagQ").addEventListener("input", () => {
+    $("btnWant").addEventListener("click", submitWant);
+    $("wantUrl").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        submitWant();
+      }
+    });
+    async function submitWant() {
+      const text = $("wantUrl").value.trim();
+      if (!text) return;
+      $("controlHint").textContent = "Queuing…";
+      try {
+        const out = await postJSON("/api/want", { text });
+        $("wantUrl").value = "";
+        const n = (out.queued || []).length;
+        $("controlHint").textContent = n
+          ? ("Queued " + n + " gallery" + (n === 1 ? "" : "ies") + " — scheduled search unchanged.")
+          : "Nothing to queue.";
+      } catch (e) {
+        $("controlHint").textContent = e.message;
+      }
+    }
       clearTimeout(suggestTimer);
       suggestTimer = setTimeout(searchTags, 350);
     });

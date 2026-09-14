@@ -26,6 +26,7 @@ import {
   loadConfigFrom,
   pageFilename,
   parseEnvFileText,
+  parseGalleryRefs,
   parseIdList,
   pickTitle,
   sanitizeFilename,
@@ -42,7 +43,7 @@ const logBuffer = [];
 const MAX_LOG = 800;
 
 const status = {
-  version: "2.3.2",
+  version: "2.4.0",
   mode: cfg.NHENTAI_TAGS ? "server" : "client",
   state: "starting",
   cycle: 0,
@@ -84,6 +85,8 @@ const status = {
   lastFullAt: null,
   nextCycleFull: true,
   delayMs: cfg.REQUEST_DELAY_MS || 2000,
+  wantQueue: [],
+  wantRecent: [],
 };
 
 let shuttingDown = false;
@@ -101,6 +104,10 @@ let incrementalPages = cfg.INCREMENTAL_PAGES ?? 10;
 let lastFullQuery = "";
 let lastFullAt = null;
 let forceFullNext = false;
+let wantQueue = [];
+let wantRecent = [];
+let wantNow = false;
+let wantBusy = false;
 let requestDelayMs = Math.max(0, cfg.REQUEST_DELAY_MS || 2000);
 const DELAY_FLOOR = requestDelayMs;
 const DELAY_STEP_MS = 1000;
@@ -131,9 +138,23 @@ async function main() {
     if (shuttingDown) break;
     await waitWhilePaused();
     if (shuttingDown) break;
+
+    const sleepLeft = status.sleepUntil ? Date.parse(status.sleepUntil) - Date.now() : 0;
+    if (wantQueue.length) await drainWantQueue();
+    if (paused && !runNow) continue;
+    if (!runNow && sleepLeft > 500) {
+      status.state = "sleeping";
+      status.currentId = null;
+      status.currentTitle = "";
+      status.message = `Sleeping until ${status.sleepUntil}`;
+      await persistStatus();
+      await sleep(sleepLeft);
+      continue;
+    }
+
     if (!liveTags.length) {
       const queued = await readIdFile(cfg.DOWNLOADME_FILEPATH);
-      if (!queued.length) {
+      if (!queued.length && !wantQueue.length) {
         status.state = "idle";
         status.sleepUntil = null;
         status.message = "No tags set — add chips below, then Run now";
@@ -143,6 +164,7 @@ async function main() {
         await persistStatus();
         continue;
       }
+      if (!queued.length && wantQueue.length) continue;
     }
     runNow = false;
     abortCycle = false;
@@ -200,13 +222,15 @@ async function runCycle() {
   const skip = new Set(await readIdFile(cfg.DONTDOWNLOADME_FILEPATH));
   const cdn = await fetchCdn();
 
+  if (wantQueue.length) await drainWantQueue(have, skip, cdn);
+
   const fromFile = await readIdFile(cfg.DOWNLOADME_FILEPATH);
   if (fromFile.length) {
     log("info", `Loaded ${fromFile.length} IDs from ${cfg.DOWNLOADME_FILEPATH}`);
     await processIds(fromFile, have, skip, cdn);
   } else if (liveTags.length) {
     await searchAndDownload(have, skip, cdn);
-  } else {
+  } else if (!wantQueue.length) {
     log("info", "No NHENTAI_TAGS and no downloadme.txt — nothing to do");
   }
 
@@ -343,6 +367,7 @@ async function searchAndDownload(have, skip, cdn) {
           await writeDownloadme(collected);
           return;
         }
+        if (wantQueue.length) await drainWantQueue(have, skip, cdn);
       } catch (err) {
         if (err?.code === "RATE_LIMIT") {
           log("warn", "Rate limited while downloading — stopping this cycle.");
@@ -689,6 +714,8 @@ function syncTagStatus() {
   status.searchPageCap = plan.cap;
   status.nextCycleFull = !plan.incremental;
   status.delayMs = requestDelayMs;
+  status.wantQueue = [...wantQueue];
+  status.wantRecent = wantRecent;
 }
 
 function loadLive() {
@@ -704,8 +731,11 @@ function loadLive() {
     if (typeof j.lastFullQuery === "string") lastFullQuery = j.lastFullQuery;
     if (typeof j.lastFullAt === "string") lastFullAt = j.lastFullAt;
     if (typeof j.forceFullNext === "boolean") forceFullNext = j.forceFullNext;
-    if (Number.isFinite(Number(j.requestDelayMs))) {
+    if (typeof j.requestDelayMs === "number" || Number.isFinite(Number(j.requestDelayMs))) {
       requestDelayMs = Math.max(DELAY_FLOOR, Math.min(DELAY_MAX_MS, Number(j.requestDelayMs)));
+    }
+    if (Array.isArray(j.wantQueue)) {
+      wantQueue = j.wantQueue.map((n) => Number(n)).filter((n) => Number.isInteger(n) && n > 0);
     }
   } catch {
     // first run: seed from Unraid env
@@ -728,6 +758,7 @@ async function saveLive() {
           lastFullAt,
           forceFullNext,
           requestDelayMs,
+          wantQueue,
         },
         null,
         2,
@@ -791,7 +822,7 @@ function recordCycle() {
 }
 
 async function waitWhilePaused() {
-  while (paused && !runNow && !shuttingDown) {
+  while (paused && !runNow && !wantNow && !shuttingDown) {
     status.state = "paused";
     status.paused = true;
     status.sleepUntil = null;
@@ -845,6 +876,84 @@ async function requestNewestOnly() {
   log("info", `Stop full search — next cycle newest ${incrementalPages} pages only`);
   await saveLive();
   wake();
+}
+
+async function requestWant(text) {
+  const ids = parseGalleryRefs(text);
+  if (!ids.length) {
+    const err = new Error("Paste an nhentai.net/g/… link or a numeric ID");
+    err.code = "BAD_WANT";
+    throw err;
+  }
+  for (const id of ids) {
+    if (!wantQueue.includes(id)) wantQueue.push(id);
+  }
+  if (wantQueue.length > 50) wantQueue.length = 50;
+  wantNow = true;
+  status.wantQueue = [...wantQueue];
+  log("info", `Queued one-off ${ids.map((n) => "#" + n).join(", ")}`);
+  await saveLive();
+  await persistStatus();
+  wake();
+  return ids;
+}
+
+async function drainWantQueue(haveArg, skipArg, cdnArg) {
+  if (wantBusy || !wantQueue.length) return;
+  wantBusy = true;
+  wantNow = false;
+  const prevState = status.state;
+  const prevMessage = status.message;
+  try {
+    const have = haveArg || await indexLibrary(cfg.LIBRARY_PATH);
+    const skip = skipArg || new Set(await readIdFile(cfg.DONTDOWNLOADME_FILEPATH));
+    const cdn = cdnArg || await fetchCdn();
+    while (wantQueue.length && !shuttingDown) {
+      const id = wantQueue[0];
+      status.wantQueue = [...wantQueue];
+      log("info", `One-off gallery ${id} (search chips ignored)`);
+      let result = "wrote";
+      let title = "";
+      try {
+        if (have.has(id)) result = "have";
+        else if (skip.has(id)) result = "blacklisted";
+        else {
+          const ok = await downloadGallery(id, cdn, have);
+          result = ok ? "wrote" : "skipped";
+          title = status.currentTitle || "";
+        }
+      } catch (err) {
+        if (err?.code === "RATE_LIMIT") {
+          log("warn", "Rate limited during one-off — leaving the rest queued");
+          break;
+        }
+        result = "failed";
+        title = err instanceof Error ? err.message : String(err);
+        log("error", `#${id} one-off failed: ${title}`);
+      }
+      wantQueue.shift();
+      wantRecent.unshift({
+        id,
+        result,
+        title,
+        at: new Date().toISOString(),
+      });
+      if (wantRecent.length > 12) wantRecent.length = 12;
+      status.wantQueue = [...wantQueue];
+      status.wantRecent = wantRecent;
+      await saveLive();
+    }
+  } finally {
+    wantBusy = false;
+    status.wantQueue = [...wantQueue];
+    if (prevState === "searching" || prevState === "sleeping" || prevState === "paused") {
+      status.state = prevState;
+      status.message = prevMessage;
+      status.currentId = null;
+      status.currentTitle = "";
+    }
+    await persistStatus();
+  }
 }
 
 function sanitizeTerms(input) {
@@ -937,6 +1046,8 @@ function snapshot() {
     lastFullQuery,
     lastFullAt,
     forceFullNext,
+    wantQueue: [...wantQueue],
+    wantRecent,
     catchUpStreak: cfg.CATCH_UP_STREAK,
     maxPerCycle: cfg.MAX_PER_CYCLE,
     sleepSeconds: cfg.SLEEP_INTERVAL,
@@ -1003,6 +1114,16 @@ function startStatusServer(port) {
           json(res, 200, snapshot());
         })
         .catch((err) => json(res, 400, { error: err instanceof Error ? err.message : String(err) }));
+      return;
+    }
+    if (path === "/api/want" && req.method === "POST") {
+      readJsonBody(req)
+        .then(async (body) => {
+          const text = body.text ?? body.url ?? body.urls ?? "";
+          const ids = await requestWant(text);
+          json(res, 200, { ...snapshot(), queued: ids });
+        })
+        .catch((err) => json(res, err?.code === "BAD_WANT" ? 400 : 400, { error: err instanceof Error ? err.message : String(err) }));
       return;
     }
     if (path === "/api/config" && req.method === "POST") {

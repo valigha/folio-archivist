@@ -9,6 +9,12 @@ Images stay on GHCR forever (until someone deletes the tag).
 | `ghcr.io/valigha/folio-archivist:2.2.0` | this release, frozen |
 | `ghcr.io/valigha/folio-archivist:v2.2.0` | same image, `v` prefix |
 
+## 2.4.0
+
+- **Add a book**: paste an `nhentai.net/g/…` link (or ID) on the status page
+- That gallery is downloaded without changing chips or kicking off a full search
+- Safety filter still applies; already-have / blacklist still skip
+
 ## 2.3.2
 
 - **Stop — newest N only** aborts the current full walk (after the gallery in progress), marks these chips as scanned, and starts an N-page cycle. Saved in `folio.json` so a container restart stays newest-only.

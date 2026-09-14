@@ -16,8 +16,8 @@ GitHub Actions publishes these tags (old ones are kept):
 | Tag | What it is |
 | --- | --- |
 | `ghcr.io/valigha/folio-archivist:latest` | Newest build. This is what Force update pulls. |
-| `ghcr.io/valigha/folio-archivist:2.3.2` | Frozen copy of that version |
-| `ghcr.io/valigha/folio-archivist:v2.3.2` | Same image, `v` prefix |
+| `ghcr.io/valigha/folio-archivist:2.4.0` | Frozen copy of that version |
+| `ghcr.io/valigha/folio-archivist:v2.4.0` | Same image, `v` prefix |
 
 **Follow new features:** leave Repository as `:latest` and Force update when we ship.
 
@@ -34,7 +34,7 @@ See [CHANGELOG.md](CHANGELOG.md) for what each number includes. Bump `VERSION` (
 5. Set `NHENTAI_TAGS` and `SLEEP_INTERVAL` exactly like the old 9-FS container
 6. Apply. WebUI is port 8099.
 
-The status page is a live dashboard: countdown to the next run, search/download progress, recently written CBZs, a filterable log, **Pause / Run now**, and **tag chips** you can change without restarting. Tag search talks to nhentai `POST /api/v2/tags/search`. Saved chips live in `config/folio.json` (overrides `NHENTAI_TAGS` after the first save from the page).
+The status page is a live dashboard: countdown to the next run, search/download progress, recently written CBZs, a filterable log, **Pause / Run now**, **tag chips**, and an **Add a book** box for a single nhentai link (does not change chips or start a full search).
 
 Make the GHCR package **public** the first time (GitHub → the repo → Packages) so Unraid can pull without a login.
 
