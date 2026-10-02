@@ -9,6 +9,10 @@ Images stay on GHCR forever (until someone deletes the tag).
 | `ghcr.io/valigha/folio-archivist:2.2.0` | this release, frozen |
 | `ghcr.io/valigha/folio-archivist:v2.2.0` | same image, `v` prefix |
 
+## 2.4.4
+
+- Manual add queue cap raised from 50 to 5000
+
 ## 2.4.3
 
 - Add a book shows how many links are in the box, and the button reads Add N

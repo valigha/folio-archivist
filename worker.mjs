@@ -43,7 +43,7 @@ const logBuffer = [];
 const MAX_LOG = 800;
 
 const status = {
-  version: "2.4.3",
+  version: "2.4.4",
   mode: cfg.NHENTAI_TAGS ? "server" : "client",
   state: "starting",
   cycle: 0,
@@ -906,7 +906,7 @@ async function requestWant(text) {
   const fresh = [];
   for (const id of ids) {
     if (wantQueue.includes(id) || fresh.includes(id)) continue;
-    if (wantQueue.length + fresh.length >= 50) break;
+    if (wantQueue.length + fresh.length >= 5000) break;
     fresh.push(id);
   }
   wantQueue.push(...fresh);
