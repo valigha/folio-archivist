@@ -336,6 +336,12 @@
       padding: 10px 12px;
       font: inherit;
     }
+    .want-count {
+      margin: 12px 0 0;
+      font-size: 22px;
+      font-variant-numeric: tabular-nums;
+      letter-spacing: -0.02em;
+    }
     .search-row textarea {
       flex: 1;
       min-width: 0;
@@ -476,6 +482,8 @@
         <textarea id="wantUrl" rows="3" autocomplete="off" placeholder="https://nhentai.net/g/123456/, https://nhentai.net/g/789012/"></textarea>
         <button type="button" class="primary" id="btnWant">Add</button>
       </div>
+      <p class="want-count" id="wantCount">0 books</p>
+      <p class="now-meta" id="wantProgress"></p>
       <ul class="list" id="wantList"></ul>
       <p class="empty" id="wantEmpty">Nothing queued.</p>
     </section>
@@ -885,6 +893,7 @@
         paintChips();
         paintCycles();
         paintWant();
+        paintWantCount();
         paintControls();
         tick();
       } catch (err) {
@@ -914,6 +923,40 @@
       }
       ul.innerHTML = rows.join("");
       empty.classList.toggle("hidden", rows.length > 0);
+    }
+
+    function countGalleryRefs(text) {
+      const seen = new Set();
+      const raw = String(text || "");
+      for (const m of raw.matchAll(/(?:https?:\/\/)?(?:www\.)?nhentai\.net\/g\/(\d+)/gi)) seen.add(m[1]);
+      const stripped = raw.replace(/https?:\/\/[^\s,;]+/gi, " ");
+      for (const part of stripped.split(/[\s,;]+/)) {
+        if (/^\d+$/.test(part) && Number(part) > 0) seen.add(String(Number(part)));
+      }
+      return seen.size;
+    }
+
+    function paintWantCount() {
+      const typed = countGalleryRefs($("wantUrl").value);
+      const batch = data.wantBatch || { total: 0, done: 0, left: 0 };
+      const left = (data.wantQueue || []).length;
+      if (typed > 0) {
+        $("wantCount").textContent = typed + (typed === 1 ? " book" : " books") + " in this add";
+        $("btnWant").textContent = "Add " + typed;
+      } else {
+        $("wantCount").textContent = batch.total
+          ? (batch.done + " of " + batch.total)
+          : "0 books";
+        $("btnWant").textContent = "Add";
+      }
+      if (!batch.total) {
+        $("wantProgress").textContent = "";
+        return;
+      }
+      const noun = batch.total === 1 ? "book" : "books";
+      $("wantProgress").textContent = left
+        ? ("Last add: " + batch.done + " of " + batch.total + " " + noun + " · " + left + " still queued")
+        : ("Last add: " + batch.total + " " + noun);
     }
 
     async function poll() {
@@ -986,6 +1029,12 @@
       incTimer = setTimeout(() => $("incPages").dispatchEvent(new Event("change")), 600);
     });
     $("btnWant").addEventListener("click", submitWant);
+    $("wantUrl").addEventListener("input", countWant);
+    function countWant() {
+      const n = countGalleryRefs($("wantUrl").value);
+      $("wantCount").textContent = n + (n === 1 ? " book" : " books") + (n ? " in this add" : "");
+      $("btnWant").textContent = n ? ("Add " + n) : "Add";
+    }
     $("wantUrl").addEventListener("keydown", (e) => {
       if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
@@ -999,9 +1048,13 @@
       try {
         const out = await postJSON("/api/want", { text });
         $("wantUrl").value = "";
-        const n = (out.queued || []).length;
+        const n = out.total || (out.queued || []).length;
+        const accepted = out.accepted ?? n;
+        countWant();
         $("controlHint").textContent = n
-          ? ("Queued " + n + " gallery" + (n === 1 ? "" : "ies") + " — scheduled search unchanged.")
+          ? ("Added " + n + (n === 1 ? " book" : " books")
+            + (accepted !== n ? " (" + accepted + " new)" : "")
+            + ".")
           : "Nothing to queue.";
       } catch (e) {
         $("controlHint").textContent = e.message;

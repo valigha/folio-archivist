@@ -9,6 +9,11 @@ Images stay on GHCR forever (until someone deletes the tag).
 | `ghcr.io/valigha/folio-archivist:2.2.0` | this release, frozen |
 | `ghcr.io/valigha/folio-archivist:v2.2.0` | same image, `v` prefix |
 
+## 2.4.3
+
+- Add a book shows how many links are in the box, and the button reads Add N
+- After Add, the page keeps a running total for that click (done of N)
+
 ## 2.4.2
 
 - Add a book accepts several links or IDs at once, separated by comma, semicolon, or a new line

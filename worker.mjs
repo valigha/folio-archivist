@@ -43,7 +43,7 @@ const logBuffer = [];
 const MAX_LOG = 800;
 
 const status = {
-  version: "2.4.2",
+  version: "2.4.3",
   mode: cfg.NHENTAI_TAGS ? "server" : "client",
   state: "starting",
   cycle: 0,
@@ -87,6 +87,7 @@ const status = {
   delayMs: cfg.REQUEST_DELAY_MS || 2000,
   wantQueue: [],
   wantRecent: [],
+  wantBatch: { total: 0, done: 0, left: 0 },
 };
 
 let shuttingDown = false;
@@ -108,6 +109,8 @@ let wantQueue = [];
 let wantRecent = [];
 let wantNow = false;
 let wantBusy = false;
+let wantBatchIds = [];
+let wantBatchDone = 0;
 let requestDelayMs = Math.max(0, cfg.REQUEST_DELAY_MS || 2000);
 const DELAY_FLOOR = requestDelayMs;
 const DELAY_STEP_MS = 1000;
@@ -716,6 +719,11 @@ function syncTagStatus() {
   status.delayMs = requestDelayMs;
   status.wantQueue = [...wantQueue];
   status.wantRecent = wantRecent;
+  status.wantBatch = {
+    total: wantBatchIds.length,
+    done: wantBatchDone,
+    left: wantQueue.length,
+  };
 }
 
 function loadLive() {
@@ -739,6 +747,12 @@ function loadLive() {
     if (Array.isArray(j.wantQueue)) {
       wantQueue = j.wantQueue.map((n) => Number(n)).filter((n) => Number.isInteger(n) && n > 0);
     }
+    if (Array.isArray(j.wantBatchIds)) {
+      wantBatchIds = j.wantBatchIds.map((n) => Number(n)).filter((n) => Number.isInteger(n) && n > 0);
+    }
+    if (Number.isFinite(Number(j.wantBatchDone))) {
+      wantBatchDone = Math.max(0, Number(j.wantBatchDone));
+    }
   } catch {
     // first run: seed from Unraid env
   }
@@ -761,6 +775,8 @@ async function saveLive() {
           forceFullNext,
           requestDelayMs,
           wantQueue,
+          wantBatchIds,
+          wantBatchDone,
         },
         null,
         2,
@@ -887,17 +903,22 @@ async function requestWant(text) {
     err.code = "BAD_WANT";
     throw err;
   }
+  const fresh = [];
   for (const id of ids) {
-    if (!wantQueue.includes(id)) wantQueue.push(id);
+    if (wantQueue.includes(id) || fresh.includes(id)) continue;
+    if (wantQueue.length + fresh.length >= 50) break;
+    fresh.push(id);
   }
-  if (wantQueue.length > 50) wantQueue.length = 50;
+  wantQueue.push(...fresh);
+  wantBatchIds = ids.slice();
+  wantBatchDone = 0;
   wantNow = true;
   status.wantQueue = [...wantQueue];
-  log("info", `Queued one-off ${ids.map((n) => "#" + n).join(", ")}`);
+  log("info", `Queued one-off ${ids.length} from this add (${fresh.length} new)`);
   await saveLive();
   await persistStatus();
   wake();
-  return ids;
+  return { ids, accepted: fresh.length, total: ids.length };
 }
 
 async function drainWantQueue(haveArg, skipArg, cdnArg) {
@@ -934,6 +955,7 @@ async function drainWantQueue(haveArg, skipArg, cdnArg) {
         log("error", `#${id} one-off failed: ${title}`);
       }
       wantQueue.shift();
+      if (wantBatchIds.includes(id)) wantBatchDone += 1;
       wantRecent.unshift({
         id,
         result,
@@ -1050,6 +1072,11 @@ function snapshot() {
     forceFullNext,
     wantQueue: [...wantQueue],
     wantRecent,
+    wantBatch: {
+      total: wantBatchIds.length,
+      done: wantBatchDone,
+      left: wantQueue.length,
+    },
     catchUpStreak: cfg.CATCH_UP_STREAK,
     maxPerCycle: cfg.MAX_PER_CYCLE,
     sleepSeconds: cfg.SLEEP_INTERVAL,
@@ -1122,8 +1149,8 @@ function startStatusServer(port) {
       readJsonBody(req)
         .then(async (body) => {
           const text = body.text ?? body.url ?? body.urls ?? "";
-          const ids = await requestWant(text);
-          json(res, 200, { ...snapshot(), queued: ids });
+          const added = await requestWant(text);
+          json(res, 200, { ...snapshot(), queued: added.ids, accepted: added.accepted, total: added.total });
         })
         .catch((err) => json(res, err?.code === "BAD_WANT" ? 400 : 400, { error: err instanceof Error ? err.message : String(err) }));
       return;
