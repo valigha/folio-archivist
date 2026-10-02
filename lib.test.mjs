@@ -69,6 +69,11 @@ test("parseGalleryRefs accepts nhentai links and raw IDs", () => {
   );
   assert.deepEqual(parseGalleryRefs("603864"), [603864]);
   assert.deepEqual(parseGalleryRefs("not a link"), []);
+  assert.deepEqual(
+    parseGalleryRefs("https://nhentai.net/g/11/, https://nhentai.net/g/22/;https://nhentai.net/g/33/"),
+    [11, 22, 33],
+  );
+  assert.deepEqual(parseGalleryRefs("100, 200;300"), [100, 200, 300]);
 });
 
 test("loadConfigFrom server mode", () => {

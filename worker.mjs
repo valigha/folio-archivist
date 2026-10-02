@@ -43,7 +43,7 @@ const logBuffer = [];
 const MAX_LOG = 800;
 
 const status = {
-  version: "2.4.1",
+  version: "2.4.2",
   mode: cfg.NHENTAI_TAGS ? "server" : "client",
   state: "starting",
   cycle: 0,
@@ -883,7 +883,7 @@ async function requestNewestOnly() {
 async function requestWant(text) {
   const ids = parseGalleryRefs(text);
   if (!ids.length) {
-    const err = new Error("Paste an nhentai.net/g/… link or a numeric ID");
+    const err = new Error("Paste nhentai.net/g/… links or IDs, separated by comma, semicolon, or a new line");
     err.code = "BAD_WANT";
     throw err;
   }

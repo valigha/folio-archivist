@@ -336,7 +336,18 @@
       padding: 10px 12px;
       font: inherit;
     }
-    .search-row input { flex: 1; min-width: 0; }
+    .search-row textarea {
+      flex: 1;
+      min-width: 0;
+      min-height: 72px;
+      resize: vertical;
+      background: var(--surface-2);
+      color: var(--fg);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 10px 12px;
+      font: inherit;
+    }
     .suggest {
       list-style: none;
       margin: 8px 0 0;
@@ -460,9 +471,9 @@
 
     <section class="card query-card">
       <h2>Add a book</h2>
-      <p class="now-meta">Paste an nhentai link (or ID). That gallery is downloaded as-is — chips and the scheduled search are not changed. The safety filter still skips illegal tags.</p>
+      <p class="now-meta">Paste one or more nhentai links or IDs, then Add. Separate them with a comma, semicolon, or a new line. Chips and the scheduled search are not changed. The safety filter still skips illegal tags.</p>
       <div class="search-row">
-        <input id="wantUrl" type="text" autocomplete="off" placeholder="https://nhentai.net/g/123456/"/>
+        <textarea id="wantUrl" rows="3" autocomplete="off" placeholder="https://nhentai.net/g/123456/, https://nhentai.net/g/789012/"></textarea>
         <button type="button" class="primary" id="btnWant">Add</button>
       </div>
       <ul class="list" id="wantList"></ul>
@@ -976,7 +987,7 @@
     });
     $("btnWant").addEventListener("click", submitWant);
     $("wantUrl").addEventListener("keydown", (e) => {
-      if (e.key === "Enter") {
+      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
         e.preventDefault();
         submitWant();
       }

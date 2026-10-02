@@ -9,6 +9,10 @@ Images stay on GHCR forever (until someone deletes the tag).
 | `ghcr.io/valigha/folio-archivist:2.2.0` | this release, frozen |
 | `ghcr.io/valigha/folio-archivist:v2.2.0` | same image, `v` prefix |
 
+## 2.4.2
+
+- Add a book accepts several links or IDs at once, separated by comma, semicolon, or a new line
+
 ## 2.4.1
 
 - Fix status page JS (broken tag-search listener) so chips and live stats render again
