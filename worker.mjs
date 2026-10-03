@@ -13,6 +13,7 @@
 import { mkdir, readFile, readdir, rename, rm, stat, unlink, writeFile, appendFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { timingSafeEqual } from "node:crypto";
+import { createServer } from "node:http";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import JSZip from "jszip";
@@ -44,7 +45,7 @@ const logBuffer = [];
 const MAX_LOG = 800;
 
 const status = {
-  version: "2.4.6",
+  version: "2.4.7",
   mode: cfg.NHENTAI_TAGS ? "server" : "client",
   state: "starting",
   cycle: 0,

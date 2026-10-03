@@ -9,6 +9,10 @@ Images stay on GHCR forever (until someone deletes the tag).
 | `ghcr.io/valigha/folio-archivist:2.2.0` | this release, frozen |
 | `ghcr.io/valigha/folio-archivist:v2.2.0` | same image, `v` prefix |
 
+## 2.4.7
+
+- Restore the HTTP server import so the dashboard starts again
+
 ## 2.4.6
 
 - `POST /api/import/nhentai` queues one gallery when `X-Api-Key` matches `LIBRARY_IMPORT_KEY`
