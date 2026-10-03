@@ -252,6 +252,22 @@ export function validateNhentaiImport(body) {
   return id;
 }
 
+/** POST /api/library/nhentai/exists. Digit ids only, at most 50. Null if invalid. */
+export function validateNhentaiExistsIds(body) {
+  if (!body || typeof body !== "object" || !Array.isArray(body.ids)) return null;
+  if (body.ids.length > 50) return null;
+  const out = [];
+  const seen = new Set();
+  for (const id of body.ids) {
+    if (typeof id !== "string" || !/^[1-9]\d*$/.test(id)) return null;
+    if (!Number.isSafeInteger(Number(id))) return null;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+  }
+  return out;
+}
+
 export function parseEnvFileText(text) {
   const out = {};
   for (const line of String(text).split("\n")) {

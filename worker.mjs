@@ -33,6 +33,7 @@ import {
   sanitizeFilename,
   searchPageCap,
   validateNhentaiImport,
+  validateNhentaiExistsIds,
 } from "./lib.mjs";
 
 const API = "https://nhentai.net/api/v2";
@@ -45,7 +46,7 @@ const logBuffer = [];
 const MAX_LOG = 800;
 
 const status = {
-  version: "2.4.7",
+  version: "2.4.8",
   mode: cfg.NHENTAI_TAGS ? "server" : "client",
   state: "starting",
   cycle: 0,
@@ -1211,6 +1212,32 @@ function startStatusServer(port) {
           }
           await enqueueImport(idNum);
           json(res, 202, { ok: true, status: "queued", id });
+        })
+        .catch(() => json(res, 400, { ok: false, error: "bad request" }));
+      return;
+    }
+    if (path === "/api/library/nhentai/exists") {
+      if (req.method !== "POST") {
+        json(res, 404, { ok: false, error: "not found" });
+        return;
+      }
+      if (!importAuthorized(req.headers["x-api-key"])) {
+        req.resume();
+        json(res, 401, { ok: false, error: "unauthorized" });
+        return;
+      }
+      readJsonBody(req)
+        .then(async (body) => {
+          const ids = validateNhentaiExistsIds(body);
+          if (!ids) {
+            json(res, 400, { ok: false, error: "bad request" });
+            return;
+          }
+          const exists = [];
+          for (const id of ids) {
+            if (await libraryHasId(Number(id))) exists.push(id);
+          }
+          json(res, 200, { ok: true, exists });
         })
         .catch(() => json(res, 400, { ok: false, error: "bad request" }));
       return;

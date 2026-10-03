@@ -12,6 +12,7 @@ import {
   galleryIsUnsafe,
   searchPageCap,
   validateNhentaiImport,
+  validateNhentaiExistsIds,
 } from "./lib.mjs";
 
 test("parseTags handles original docker array syntax", () => {
@@ -103,6 +104,16 @@ test("validateNhentaiImport accepts only an exact gallery url", () => {
   assert.equal(validateNhentaiImport({ ...ok, url: "https://www.nhentai.net/g/123456/" }), null);
   assert.equal(validateNhentaiImport({ ...ok, source: "other" }), null);
   assert.equal(validateNhentaiImport({ ...ok, id: "nope", url: "https://nhentai.net/g/nope/" }), null);
+});
+
+test("validateNhentaiExistsIds accepts a digit batch and drops duplicates", () => {
+  assert.deepEqual(validateNhentaiExistsIds({ ids: ["123456", "789012", "123456"] }), ["123456", "789012"]);
+  assert.deepEqual(validateNhentaiExistsIds({ ids: [] }), []);
+  assert.equal(validateNhentaiExistsIds({ ids: ["0123"] }), null);
+  assert.equal(validateNhentaiExistsIds({ ids: [123456] }), null);
+  assert.equal(validateNhentaiExistsIds({ ids: ["12a"] }), null);
+  assert.equal(validateNhentaiExistsIds({ ids: Array.from({ length: 51 }, (_, i) => String(i + 1)) }), null);
+  assert.equal(validateNhentaiExistsIds({}), null);
 });
 
 test("galleryIsUnsafe", () => {

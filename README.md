@@ -16,8 +16,8 @@ GitHub Actions publishes these tags (old ones are kept):
 | Tag | What it is |
 | --- | --- |
 | `ghcr.io/valigha/folio-archivist:latest` | Newest build. This is what Force update pulls. |
-| `ghcr.io/valigha/folio-archivist:2.4.7` | Frozen copy of that version |
-| `ghcr.io/valigha/folio-archivist:v2.4.7` | Same image, `v` prefix |
+| `ghcr.io/valigha/folio-archivist:2.4.8` | Frozen copy of that version |
+| `ghcr.io/valigha/folio-archivist:v2.4.8` | Same image, `v` prefix |
 
 **Follow new features:** leave Repository as `:latest` and Force update when we ship.
 
@@ -89,6 +89,8 @@ The container listens on `0.0.0.0:8099`. Unraid publishes that as host port **80
 ```
 
 Already on disk: `200 {"ok":true,"status":"exists","id":"123456"}`. Otherwise it is queued on the same one-off download path and the call returns immediately: `202 {"ok":true,"status":"queued","id":"123456"}`. Missing or wrong key: `401 {"ok":false,"error":"unauthorized"}`.
+
+`POST http://<lan-ip>:8099/api/library/nhentai/exists` is read-only. Same key, no CORS. Body `{ "ids": ["123456", "789012"] }` — digit strings only, 50 max. Response `200 {"ok":true,"exists":["123456"]}`. Ids not in the library are left out. It does not queue a download.
 
 ## Skip logic
 
