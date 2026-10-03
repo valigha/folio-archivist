@@ -12,7 +12,7 @@
  */
 import { mkdir, readFile, readdir, rename, rm, stat, unlink, writeFile, appendFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
-import { createServer } from "node:http";
+import { timingSafeEqual } from "node:crypto";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import JSZip from "jszip";
@@ -31,6 +31,7 @@ import {
   pickTitle,
   sanitizeFilename,
   searchPageCap,
+  validateNhentaiImport,
 } from "./lib.mjs";
 
 const API = "https://nhentai.net/api/v2";
@@ -43,7 +44,7 @@ const logBuffer = [];
 const MAX_LOG = 800;
 
 const status = {
-  version: "2.4.5",
+  version: "2.4.6",
   mode: cfg.NHENTAI_TAGS ? "server" : "client",
   state: "starting",
   cycle: 0,
@@ -921,6 +922,36 @@ async function requestWant(text) {
   return { ids, accepted: fresh.length, total: ids.length };
 }
 
+function importAuthorized(header) {
+  const expected = cfg.LIBRARY_IMPORT_KEY;
+  if (!expected || typeof header !== "string" || !header) return false;
+  const a = Buffer.from(header);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+}
+
+async function libraryHasId(id) {
+  const dir = libraryDir(cfg.LIBRARY_PATH, cfg.LIBRARY_SPLIT, id);
+  let names;
+  try {
+    names = await readdir(dir);
+  } catch {
+    return false;
+  }
+  return names.some((name) => name.toLowerCase().endsWith(".cbz") && idFromFilename(name) === id);
+}
+
+async function enqueueImport(idNum) {
+  if (!wantQueue.includes(idNum)) wantQueue.push(idNum);
+  wantNow = true;
+  status.wantQueue = [...wantQueue];
+  log("info", `Import queued #${idNum}`);
+  await saveLive();
+  await persistStatus();
+  wake();
+}
+
 async function drainWantQueue(haveArg, skipArg, cdnArg) {
   if (wantBusy || !wantQueue.length) return;
   wantBusy = true;
@@ -1153,6 +1184,34 @@ function startStatusServer(port) {
           json(res, 200, { ...snapshot(), queued: added.ids, accepted: added.accepted, total: added.total });
         })
         .catch((err) => json(res, err?.code === "BAD_WANT" ? 400 : 400, { error: err instanceof Error ? err.message : String(err) }));
+      return;
+    }
+    if (path === "/api/import/nhentai") {
+      if (req.method !== "POST") {
+        json(res, 404, { ok: false, error: "not found" });
+        return;
+      }
+      if (!importAuthorized(req.headers["x-api-key"])) {
+        req.resume();
+        json(res, 401, { ok: false, error: "unauthorized" });
+        return;
+      }
+      readJsonBody(req)
+        .then(async (body) => {
+          const id = validateNhentaiImport(body);
+          if (!id) {
+            json(res, 400, { ok: false, error: "bad request" });
+            return;
+          }
+          const idNum = Number(id);
+          if (await libraryHasId(idNum)) {
+            json(res, 200, { ok: true, status: "exists", id });
+            return;
+          }
+          await enqueueImport(idNum);
+          json(res, 202, { ok: true, status: "queued", id });
+        })
+        .catch(() => json(res, 400, { ok: false, error: "bad request" }));
       return;
     }
     if (path === "/api/config" && req.method === "POST") {

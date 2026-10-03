@@ -236,8 +236,20 @@ export function loadConfigFrom(env) {
     REQUEST_DELAY_MS: Math.max(0, num(env.REQUEST_DELAY_MS, 2000)),
     MAX_SEARCH_PAGES: Math.max(0, num(env.MAX_SEARCH_PAGES, 0)),
     INCREMENTAL_PAGES: Math.max(0, num(env.INCREMENTAL_PAGES, 10)),
+    LIBRARY_IMPORT_KEY: env.LIBRARY_IMPORT_KEY || "",
     TZ: env.TZ || "",
   };
+}
+
+/** POST /api/import/nhentai body. Returns the gallery id string, or null. */
+export function validateNhentaiImport(body) {
+  if (!body || typeof body !== "object") return null;
+  if (body.source !== "nhentai") return null;
+  const id = body.id;
+  if (typeof id !== "string" || !/^[1-9]\d*$/.test(id)) return null;
+  if (!Number.isSafeInteger(Number(id))) return null;
+  if (body.url !== `https://nhentai.net/g/${id}/`) return null;
+  return id;
 }
 
 export function parseEnvFileText(text) {

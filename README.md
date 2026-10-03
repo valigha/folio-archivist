@@ -16,8 +16,8 @@ GitHub Actions publishes these tags (old ones are kept):
 | Tag | What it is |
 | --- | --- |
 | `ghcr.io/valigha/folio-archivist:latest` | Newest build. This is what Force update pulls. |
-| `ghcr.io/valigha/folio-archivist:2.4.5` | Frozen copy of that version |
-| `ghcr.io/valigha/folio-archivist:v2.4.5` | Same image, `v` prefix |
+| `ghcr.io/valigha/folio-archivist:2.4.6` | Frozen copy of that version |
+| `ghcr.io/valigha/folio-archivist:v2.4.6` | Same image, `v` prefix |
 
 **Follow new features:** leave Repository as `:latest` and Force update when we ship.
 
@@ -59,7 +59,8 @@ Make the GHCR package **public** the first time (GitHub → the repo → Package
 | `CIRCUMVENT_LOAD_BALANCER` | `true` | Hit `i1`–`i4.nhentai.net` directly |
 | `API_KEY` | empty | Optional. Sent as `Authorization: Key …` |
 | `USER_AGENT` | Folio/1.0 … | API v2 wants a descriptive UA |
-| `STATUS_PORT` | `8099` | Tiny dashboard. `0` disables it |
+| `STATUS_PORT` | `8099` | Dashboard and import API. Listens on `0.0.0.0`. `0` disables it |
+| `LIBRARY_IMPORT_KEY` | empty | If set, `POST /api/import/nhentai` accepts header `X-Api-Key`. Empty rejects every import |
 | `RUN_ONCE` | `false` | Do one cycle and exit even in server mode (useful to test) |
 | `DRY_RUN` | `false` | Log what would be written without fetching pages |
 | `PUID` / `PGID` / `UMASK` / `TZ` | `99` / `100` / `002` | Unraid defaults |
@@ -76,6 +77,18 @@ tag:"ffm threesome" tag:"sister" -tag:"full censorship"
 ```
 
 Do **not** start with a huge query like all of English unless you mean it — the first pass will keep downloading until `CATCH_UP_STREAK` hits already-archived IDs (empty library = no streak, so it will walk the whole search). Use `MAX_PER_CYCLE=20` while you test.
+
+## Import API
+
+`POST http://<lan-ip>:8099/api/import/nhentai`
+
+The container listens on `0.0.0.0:8099`. Unraid publishes that as host port **8099** unless you changed the WebUI port mapping. No CORS headers. Header `X-Api-Key` must match `LIBRARY_IMPORT_KEY`.
+
+```json
+{"source":"nhentai","id":"123456","url":"https://nhentai.net/g/123456/"}
+```
+
+Already on disk: `200 {"ok":true,"status":"exists","id":"123456"}`. Otherwise it is queued on the same one-off download path and the call returns immediately: `202 {"ok":true,"status":"queued","id":"123456"}`. Missing or wrong key: `401 {"ok":false,"error":"unauthorized"}`.
 
 ## Skip logic
 

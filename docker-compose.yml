@@ -39,6 +39,7 @@ services:
       SEARCH_SORT: date
       # RUN_ONCE: "true"   # one cycle then exit, for testing
       STATUS_PORT: "8099"
+      # LIBRARY_IMPORT_KEY: ""  # X-Api-Key for POST /api/import/nhentai
       USER_AGENT: "Folio/1.0 (nhentai API v2 archivist; +https://nhentai.net/api/v2/docs)"
       # API_KEY: ""
     volumes:

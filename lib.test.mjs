@@ -11,6 +11,7 @@ import {
   sanitizeFilename,
   galleryIsUnsafe,
   searchPageCap,
+  validateNhentaiImport,
 } from "./lib.mjs";
 
 test("parseTags handles original docker array syntax", () => {
@@ -90,6 +91,18 @@ test("loadConfigFrom server mode", () => {
   assert.equal(cfg.REQUEST_DELAY_MS, 2000);
   assert.equal(loadConfigFrom({}).NHENTAI_TAGS, null);
   assert.equal(loadConfigFrom({ REQUEST_DELAY_MS: "1500" }).REQUEST_DELAY_MS, 1500);
+});
+
+test("validateNhentaiImport accepts only an exact gallery url", () => {
+  const ok = { source: "nhentai", id: "123456", url: "https://nhentai.net/g/123456/", title: "x", tags: [] };
+  assert.equal(validateNhentaiImport(ok), "123456");
+  assert.equal(validateNhentaiImport({ ...ok, id: 123456 }), null);
+  assert.equal(validateNhentaiImport({ ...ok, id: "0123", url: "https://nhentai.net/g/0123/" }), null);
+  assert.equal(validateNhentaiImport({ ...ok, url: "https://nhentai.net/g/123456" }), null);
+  assert.equal(validateNhentaiImport({ ...ok, url: "http://nhentai.net/g/123456/" }), null);
+  assert.equal(validateNhentaiImport({ ...ok, url: "https://www.nhentai.net/g/123456/" }), null);
+  assert.equal(validateNhentaiImport({ ...ok, source: "other" }), null);
+  assert.equal(validateNhentaiImport({ ...ok, id: "nope", url: "https://nhentai.net/g/nope/" }), null);
 });
 
 test("galleryIsUnsafe", () => {
