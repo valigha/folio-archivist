@@ -43,7 +43,7 @@ const logBuffer = [];
 const MAX_LOG = 800;
 
 const status = {
-  version: "2.4.4",
+  version: "2.4.5",
   mode: cfg.NHENTAI_TAGS ? "server" : "client",
   state: "starting",
   cycle: 0,
