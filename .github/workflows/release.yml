@@ -33,8 +33,13 @@ jobs:
         run: |
           V="${IN_VERSION:-$(tr -d ' \n' < VERSION)}"
           TARGET="${IN_TARGET:-$GITHUB_SHA}"
+          # A normal run (no version typed in) releases the current version and marks it Latest.
+          # Releasing an older version by hand must not steal the Latest badge.
+          if [ -z "$IN_VERSION" ]; then LATEST="--latest"; else LATEST="--latest=false"; fi
           if gh release view "v$V" >/dev/null 2>&1; then
-            echo "Release v$V already exists, nothing to do."; exit 0
+            echo "Release v$V already exists."
+            [ -z "$IN_VERSION" ] && gh release edit "v$V" --latest
+            exit 0
           fi
           git fetch origin "$TARGET" 2>/dev/null || true
           SHA=$(git rev-parse --verify -q "origin/$TARGET^{commit}" || git rev-parse --verify -q "$TARGET^{commit}")
@@ -56,4 +61,4 @@ jobs:
             git tag -a "v$V" "$SHA" -m "v$V"
             git push origin "refs/tags/v$V"
           fi
-          gh release create "v$V" --verify-tag --title "v$V" --notes-file notes.md
+          gh release create "v$V" --verify-tag --title "v$V" --notes-file notes.md $LATEST
