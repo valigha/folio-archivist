@@ -125,7 +125,7 @@
     }
     .stats {
       display: grid;
-      grid-template-columns: repeat(5, minmax(0, 1fr));
+      grid-template-columns: repeat(6, minmax(0, 1fr));
       gap: 10px;
       margin: 22px 0;
     }
@@ -137,6 +137,10 @@
     }
     .stat b { display: block; font-size: 22px; font-variant-numeric: tabular-nums; letter-spacing: -0.03em; }
     .stat span { color: var(--muted); font-size: 12px; letter-spacing: 0.04em; }
+    .stat small { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; }
+    .stat small.scanning { color: var(--warn); }
+    .stat button.link { background: none; border: 0; padding: 0; margin-top: 2px; color: var(--muted); font-size: 11px; text-decoration: underline; cursor: pointer; }
+    .stat button.link:hover { color: var(--fg); }
     .grid {
       display: grid;
       grid-template-columns: 1.15fr 0.85fr;
@@ -452,7 +456,8 @@
     </div>
 
     <div class="stats">
-      <div class="stat"><span>Library</span><b id="sLibrary">0</b></div>
+      <div class="stat"><span>Library (all books)</span><b id="sLibrary">0</b><small id="sLibNote"></small><button type="button" class="link" id="btnRescan">Rescan</button></div>
+      <div class="stat"><span>From Folio</span><b id="sFolio">0</b><small id="sFolioNote"></small></div>
       <div class="stat"><span>Added</span><b id="sAdded">0</b></div>
       <div class="stat"><span>Skipped</span><b id="sSkipped">0</b></div>
       <div class="stat"><span>Failed</span><b id="sFailed">0</b></div>
@@ -658,6 +663,16 @@
       const pct = $("pct");
       const st = data.state;
       paintSearchLine();
+      if (data.libraryScanning && st !== "downloading") {
+        const found = data.libraryScanFound || 0;
+        title.textContent = "Scanning the library…";
+        meta.textContent = (found ? (found.toLocaleString() + " books counted so far · ") : "")
+          + "the page is working — a large library can take a few minutes the first time";
+        fill.style.width = "35%";
+        bar.className = "bar warn";
+        pct.textContent = "";
+        return;
+      }
       if (st === "paused" || data.paused && st !== "downloading") {
         title.textContent = "Paused";
         meta.textContent = "Current gallery will finish. Click Run now when you want the next cycle.";
@@ -893,7 +908,20 @@
         $("tags").textContent = (data.tagList && data.tagList.length)
           ? (data.tagList.length + " chip" + (data.tagList.length === 1 ? "" : "s"))
           : "No query yet";
-        $("sLibrary").textContent = (data.libraryCount || 0).toLocaleString();
+        const lib = data.libraryTotal || 0;
+        const mine = data.libraryCount || 0;
+        const scanning = Boolean(data.libraryScanning);
+        const note = $("sLibNote");
+        $("sLibrary").textContent = (scanning && !lib) ? "…" : lib.toLocaleString();
+        $("sFolio").textContent = (scanning && !mine) ? "…" : mine.toLocaleString();
+        $("sFolioNote").textContent = Math.max(0, lib - mine) ? (Math.max(0, lib - mine).toLocaleString() + " from other tools") : "";
+        note.className = scanning ? "scanning" : "";
+        if (scanning) note.textContent = "scanning…" + (data.libraryScanFound ? (" " + data.libraryScanFound.toLocaleString() + " so far") : "");
+        else if (data.libraryScannedAt) {
+          const mins = Math.max(0, Math.round((Date.now() - Date.parse(data.libraryScannedAt)) / 60000));
+          note.textContent = "checked " + (mins < 1 ? "just now" : mins + "m ago");
+        } else note.textContent = "";
+        $("btnRescan").disabled = scanning;
         $("sAdded").textContent = String(data.addedThisCycle ?? data.downloaded ?? 0);
         $("sSkipped").textContent = String(data.skippedThisCycle ?? data.skipped ?? 0);
         $("sFailed").textContent = String(data.failedThisCycle ?? data.failed ?? 0);
@@ -1013,6 +1041,11 @@
       $("controlHint").textContent = "Starting…";
       postJSON("/api/control", { action: "run" }).catch((e) => {
         $("controlHint").textContent = e.message;
+      });
+    });
+    $("btnRescan").addEventListener("click", () => {
+      postJSON("/api/rescan", {}).catch((e) => {
+        $("controlHint").textContent = e.message || "Rescan failed";
       });
     });
     $("btnFull").addEventListener("click", () => {
