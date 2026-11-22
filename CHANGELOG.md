@@ -6,8 +6,12 @@ Images stay on GHCR forever (until someone deletes the tag).
 | Unraid Repository | Meaning |
 | --- | --- |
 | `ghcr.io/valigha/folio-archivist:latest` | newest, may change |
-| `ghcr.io/valigha/folio-archivist:2.5.1` | this release, frozen |
-| `ghcr.io/valigha/folio-archivist:v2.5.1` | same image, `v` prefix |
+| `ghcr.io/valigha/folio-archivist:2.5.2` | this release, frozen |
+| `ghcr.io/valigha/folio-archivist:v2.5.2` | same image, `v` prefix |
+
+## 2.5.2
+
+- Release workflow marks the newest version as GitHub's Latest release
 
 ## 2.5.1
 
