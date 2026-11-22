@@ -1,0 +1,55 @@
+name: GitHub Release
+
+# Creates a GitHub Release (and its v-tag) for the version in VERSION.
+# Runs on every push to main; does nothing if that release already exists.
+# Manual run: give a version and the branch/commit to release (for older versions).
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, e.g. 1.4.1 (blank = contents of VERSION)"
+        required: false
+      target:
+        description: "Branch or commit to tag (blank = this ref)"
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IN_VERSION: ${{ inputs.version }}
+          IN_TARGET: ${{ inputs.target }}
+        run: |
+          V="${IN_VERSION:-$(tr -d ' \n' < VERSION)}"
+          TARGET="${IN_TARGET:-$GITHUB_SHA}"
+          if gh release view "v$V" >/dev/null 2>&1; then
+            echo "Release v$V already exists, nothing to do."; exit 0
+          fi
+          git fetch origin "$TARGET" 2>/dev/null || true
+          SHA=$(git rev-parse --verify -q "origin/$TARGET^{commit}" || git rev-parse --verify -q "$TARGET^{commit}")
+          # Notes: the matching "## <version>" section of CHANGELOG.md from that commit
+          git show "$SHA:CHANGELOG.md" 2>/dev/null | awk -v v="$V" '
+            /^## /{ if (on) exit; if (index($0,"## " v)==1) {on=1; next} }
+            on{print}' > notes.md || true
+          [ -s notes.md ] || echo "Release $V" > notes.md
+          {
+            echo; echo "---"
+            echo "Docker image: \`ghcr.io/${GITHUB_REPOSITORY}:$V\`"
+          } >> notes.md
+          echo "Tagging $SHA as v$V"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "v$V" "$SHA" -m "v$V"
+          git push origin "refs/tags/v$V"
+          gh release create "v$V" --verify-tag --title "v$V" --notes-file notes.md

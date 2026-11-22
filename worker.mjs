@@ -46,7 +46,7 @@ const logBuffer = [];
 const MAX_LOG = 800;
 
 const status = {
-  version: "2.4.8",
+  version: "2.5.0",
   mode: cfg.NHENTAI_TAGS ? "server" : "client",
   state: "starting",
   cycle: 0,
@@ -58,7 +58,11 @@ const status = {
   addedThisCycle: 0,
   skippedThisCycle: 0,
   failedThisCycle: 0,
-  libraryCount: 0,
+  libraryCount: 0, // books Folio itself manages (numeric file names)
+  libraryTotal: 0, // every .cbz in the library, from any tool
+  libraryScanning: false,
+  libraryScanFound: 0,
+  libraryScannedAt: null,
   lastCycleAt: null,
   cycleStartedAt: null,
   sleepUntil: null,
@@ -94,6 +98,7 @@ const status = {
 };
 
 let shuttingDown = false;
+const scanState = { busy: false, promise: null }; // library scan in progress
 let sleepTimer = null;
 let sleepResolve = null;
 let lastApiAt = 0;
@@ -131,6 +136,12 @@ loadCycles();
 syncTagStatus();
 
 if (cfg.STATUS_PORT) startStatusServer(cfg.STATUS_PORT);
+
+// Count the library in the background so the page is up (and says "scanning") straight away.
+scanLibrary("startup").catch((err) => log("warn", `Library scan failed: ${err instanceof Error ? err.message : err}`));
+setInterval(() => {
+  if (!shuttingDown) scanLibrary("periodic").catch(() => {});
+}, 60 * 60_000).unref();
 
 log(
   "info",
@@ -223,8 +234,8 @@ async function main() {
 
 async function runCycle() {
   rateLimitHits = 0;
-  const have = await indexLibrary(cfg.LIBRARY_PATH);
-  status.libraryCount = have.size;
+  status.message = "Scanning the library…";
+  const have = await scanLibrary("cycle");
   const skip = new Set(await readIdFile(cfg.DONTDOWNLOADME_FILEPATH));
   const cdn = await fetchCdn();
 
@@ -244,7 +255,7 @@ async function runCycle() {
   status.lastCycleAt = new Date().toISOString();
   status.currentId = null;
   status.currentTitle = "";
-  status.libraryCount = have.size;
+  setLibraryCounts(have);
   await persistStatus();
 }
 
@@ -480,6 +491,7 @@ async function downloadGallery(id, cdn, have) {
     status.downloaded += 1;
     status.addedThisCycle += 1;
     status.libraryCount = have.size;
+    status.libraryTotal += 1;
     log("info", `Wrote ${dest} (${pages.length} pages)`);
     pushEvent("wrote", { id, title: filename, pages: pages.length });
     if (cfg.CLEANUP_TEMPORARY_FILES) {
@@ -619,6 +631,8 @@ function imageHeaders() {
 
 async function indexLibrary(root) {
   const ids = new Set();
+  let other = 0;
+  let seen = 0;
   async function scan(dir, depth) {
     let entries;
     try {
@@ -632,12 +646,49 @@ async function indexLibrary(root) {
       else if (entry.isFile() && entry.name.toLowerCase().endsWith(".cbz")) {
         const id = idFromFilename(entry.name);
         if (id) ids.add(id);
+        else other += 1;
+        seen += 1;
+        if (scanState.busy && seen % 200 === 0) status.libraryScanFound = seen;
       }
     }
   }
   await scan(root, 0);
-  log("info", `Library index: ${ids.size} existing CBZ`);
+  ids.other = other;
   return ids;
+}
+
+function setLibraryCounts(have) {
+  status.libraryCount = have.size;
+  status.libraryTotal = have.size + (have.other || 0);
+}
+
+// One scan at a time: callers that arrive while a scan runs share its result.
+function scanLibrary(why = "cycle") {
+  if (scanState.promise) return scanState.promise;
+  scanState.busy = true;
+  status.libraryScanning = true;
+  status.libraryScanFound = 0;
+  const t0 = Date.now();
+  if (why !== "periodic") log("info", `Scanning the library (${why})…`);
+  scanState.promise = (async () => {
+    try {
+      const have = await indexLibrary(cfg.LIBRARY_PATH);
+      setLibraryCounts(have);
+      status.libraryScannedAt = new Date().toISOString();
+      const total = status.libraryTotal;
+      if (why !== "periodic") {
+        log("info", `Library: ${total} .cbz in total, ${have.size} Folio, ${have.other || 0} from other tools (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
+      }
+      if (!total && why !== "periodic") log("warn", `Nothing found in ${cfg.LIBRARY_PATH} — check that the library path is the right folder`);
+      return have;
+    } finally {
+      scanState.busy = false;
+      scanState.promise = null;
+      status.libraryScanning = false;
+      status.libraryScanFound = 0;
+    }
+  })();
+  return scanState.promise;
 }
 
 async function readIdFile(path) {
@@ -961,7 +1012,7 @@ async function drainWantQueue(haveArg, skipArg, cdnArg) {
   const prevState = status.state;
   const prevMessage = status.message;
   try {
-    const have = haveArg || await indexLibrary(cfg.LIBRARY_PATH);
+    const have = haveArg || await scanLibrary("queue");
     const skip = skipArg || new Set(await readIdFile(cfg.DONTDOWNLOADME_FILEPATH));
     const cdn = cdnArg || await fetchCdn();
     while (wantQueue.length && !shuttingDown) {
@@ -1140,6 +1191,11 @@ function startStatusServer(port) {
     const path = url.pathname;
     if (path === "/health") {
       json(res, 200, { ok: true, state: status.state, paused });
+      return;
+    }
+    if (path === "/api/rescan" && req.method === "POST") {
+      scanLibrary("button").catch(() => {});
+      json(res, 200, snapshot());
       return;
     }
     if (path === "/api/status" || path === "/status.json") {

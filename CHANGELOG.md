@@ -6,8 +6,17 @@ Images stay on GHCR forever (until someone deletes the tag).
 | Unraid Repository | Meaning |
 | --- | --- |
 | `ghcr.io/valigha/folio-archivist:latest` | newest, may change |
-| `ghcr.io/valigha/folio-archivist:2.2.0` | this release, frozen |
-| `ghcr.io/valigha/folio-archivist:v2.2.0` | same image, `v` prefix |
+| `ghcr.io/valigha/folio-archivist:2.5.0` | this release, frozen |
+| `ghcr.io/valigha/folio-archivist:v2.5.0` | same image, `v` prefix |
+
+## 2.5.0
+
+- Dashboard shows the whole library (every `.cbz`, including other tools such as Nexus) and a separate "From Folio" count
+- The page now loads immediately and says "Scanning the library…" (with a running count) while the library is counted in the background
+- Container start no longer waits on a recursive ownership change over the whole library, which could keep the page unreachable for minutes
+- Rescan button, plus an automatic recount every hour
+- A GitHub Release is now created automatically for each version
+- Rollback: set the Repository to `ghcr.io/valigha/folio-archivist:2.4.8`
 
 ## 2.4.8
 
